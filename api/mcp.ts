@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setSelectField, setSprintField, listLabels, listMembers, listIssues, SELECT_OPTIONS, SPRINT_OPTIONS } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, listLabels, listMembers, listIssues, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -13,7 +13,7 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "create_issue",
     {
-      description: "Crée une issue GitHub sur mission-apprentissage/labonnealternance et l'ajoute automatiquement au GitHub Project en statut 'à faire'. Retourne l'URL de l'issue et le project item ID (à utiliser avec set_project_field pour définir l'équipe).",
+      description: "Crée une issue GitHub sur mission-apprentissage/labonnealternance et l'ajoute automatiquement au GitHub Project en statut 'à faire'. Retourne l'URL, le project item ID (pour status/team/epic/approver/sprint) et l'issue node ID (pour priority).",
       inputSchema: {
         title: z.string().describe("Titre de l'issue"),
         description: z.string().optional().describe("Corps de l'issue en markdown"),
@@ -24,7 +24,7 @@ function buildMcpServer(): McpServer {
       const issue = await createIssue({ title, body: description, assignees });
       const itemId = await addIssueToProject(issue.node_id);
       return {
-        content: [{ type: "text" as const, text: `Issue créée et ajoutée au projet !\n\n**#${issue.number}** — ${issue.title}\n${issue.html_url}\n\nProject item ID : \`${itemId}\`\n_(utilise \`set_project_field\` avec cet ID pour définir l'équipe)_` }],
+        content: [{ type: "text" as const, text: `Issue créée et ajoutée au projet !\n\n**#${issue.number}** — ${issue.title}\n${issue.html_url}\n\nProject item ID : \`${itemId}\` _(status, team, epic, approver, sprint)_\nIssue node ID : \`${issue.node_id}\` _(priority)_` }],
       };
     }
   );
@@ -32,28 +32,31 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "set_project_field",
     {
-      description: `Définit un champ du GitHub Project LBA sur un item. À appeler après create_issue avec le project item ID retourné.
-Champs disponibles :
-- status : ${Object.keys(SELECT_OPTIONS.status).join(" | ")}
-- team : ${Object.keys(SELECT_OPTIONS.team).join(" | ")}
-- epic : (liste complète via list_epics)
-- approver : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")}
-- sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")}`,
+      description: `Définit un champ sur une issue ou un item du GitHub Project LBA.
+- status : ${Object.keys(SELECT_OPTIONS.status).join(" | ")} → project item ID
+- team : ${Object.keys(SELECT_OPTIONS.team).join(" | ")} → project item ID
+- epic : (liste complète via list_epics) → project item ID
+- approver : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")} → project item ID
+- sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")} → project item ID
+- priority : ${Object.keys(PRIORITY_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)`,
       inputSchema: {
-        item_id: z.string().describe("ID de l'item dans le projet (retourné par create_issue)"),
-        field: z.enum(["status", "team", "epic", "approver", "sprint"]).describe("Champ à modifier"),
+        id: z.string().describe("Project item ID (retourné par create_issue) pour tous les champs sauf priority. Pour priority, utiliser l'issue node ID."),
+        field: z.enum(["status", "team", "epic", "approver", "sprint", "priority"]).describe("Champ à modifier"),
         value: z.string().describe("Valeur du champ (voir description pour les valeurs valides)"),
       },
     },
-    async ({ item_id, field, value }) => {
-      if (field === "sprint") {
-        await setSprintField(item_id, value);
+    async ({ id, field, value }) => {
+      if (field === "priority") {
+        await setPriorityField(id, value);
+      } else if (field === "sprint") {
+        await setSprintField(id, value);
       } else {
-        await setSelectField(item_id, field, value);
+        await setSelectField(id, field, value);
       }
       return {
         content: [{ type: "text" as const, text: `Champ "${field}" mis à jour → "${value}"` }],
       };
+
     }
   );
 

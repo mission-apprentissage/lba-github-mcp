@@ -13,6 +13,8 @@ export const SELECT_FIELD_IDS = {
   approver: "PVTSSF_lADOA8sl_s4BW3LizhSmLWU",
 } as const;
 
+const PRIORITY_FIELD_ID = "IFSS_kgDOAPO9Ww";
+
 export const SPRINT_FIELD_ID = "PVTIF_lADOA8sl_s4BW3LizhSfYwQ";
 
 export const SELECT_OPTIONS: Record<keyof typeof SELECT_FIELD_IDS, Record<string, string>> = {
@@ -95,6 +97,13 @@ export const SELECT_OPTIONS: Record<keyof typeof SELECT_FIELD_IDS, Record<string
     "Claire":  "706c109d",
     "Kevin":   "7f271d5b",
   },
+};
+
+export const PRIORITY_OPTIONS: Record<string, string> = {
+  "Urgent": "IFSSO_kgDOAap2pA",
+  "High":   "IFSSO_kgDOAap2pQ",
+  "Medium": "IFSSO_kgDOAap2pg",
+  "Low":    "IFSSO_kgDOAap2pw",
 };
 
 export const SPRINT_OPTIONS: Record<string, string> = {
@@ -239,6 +248,18 @@ export async function setSelectField(itemId: string, field: keyof typeof SELECT_
   await graphqlRequest(
     `mutation($pid:ID!,$iid:ID!,$fid:ID!,$oid:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$iid,fieldId:$fid,value:{singleSelectOptionId:$oid}}){projectV2Item{id}}}`,
     { pid: PROJECT_ID, iid: itemId, fid: fieldId, oid: optionId }
+  );
+}
+
+export async function setPriorityField(issueNodeId: string, priority: string): Promise<void> {
+  const optionId = PRIORITY_OPTIONS[priority];
+  if (!optionId) {
+    const valid = Object.keys(PRIORITY_OPTIONS).join(", ");
+    throw new Error(`Priorité "${priority}" inconnue. Valeurs valides : ${valid}`);
+  }
+  await graphqlRequest(
+    `mutation($iid:ID!,$fid:ID!,$oid:ID!){setIssueFieldValue(input:{issueId:$iid,issueFields:[{fieldId:$fid,singleSelectOptionId:$oid}]}){issue{number}}}`,
+    { iid: issueNodeId, fid: PRIORITY_FIELD_ID, oid: optionId }
   );
 }
 
