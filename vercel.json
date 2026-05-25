@@ -1,7 +1,7 @@
 {
   "version": 2,
   "functions": {
-    "api/mcp.ts": { "maxDuration": 300 }
+    "api/mcp.ts": { "maxDuration": 300, "includeFiles": "node_modules/@modelcontextprotocol/**" }
   },
   "rewrites": [{ "source": "/mcp", "destination": "/api/mcp" }]
 }
