@@ -4,9 +4,4 @@
     "api/mcp.ts": { "maxDuration": 300 }
   },
   "rewrites": [{ "source": "/mcp", "destination": "/api/mcp" }],
-  "env": {
-    "GITHUB_APP_ID": "@lba-github-app-id",
-    "GITHUB_PRIVATE_KEY": "@lba-github-private-key",
-    "GITHUB_INSTALLATION_ID": "@lba-github-installation-id"
-  }
 }
