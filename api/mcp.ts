@@ -101,6 +101,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  const secret = process.env.MCP_SECRET;
+  if (secret && req.query["token"] !== secret) {
+    res.status(401).json({ error: "Non autorisé" });
+    return;
+  }
+
   const sessionId = req.headers["mcp-session-id"];
 
   if (typeof sessionId === "string") {
