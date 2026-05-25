@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, listLabels, listMembers, listIssues } from "./github";
+import { createIssue, addIssueToProject, setProjectField, listLabels, listMembers, listIssues } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -13,28 +13,36 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "create_issue",
     {
-      description: "Crée une issue GitHub sur mission-apprentissage/labonnealternance.",
+      description: "Crée une issue GitHub sur mission-apprentissage/labonnealternance et l'ajoute automatiquement au GitHub Project en statut 'à faire'. Retourne l'URL de l'issue et le project item ID (à utiliser avec set_project_field pour définir l'équipe).",
       inputSchema: {
         title: z.string().describe("Titre de l'issue"),
-        body: z.string().optional().describe("Description en markdown"),
-        labels: z.array(z.string()).optional().describe("Labels à appliquer"),
+        description: z.string().optional().describe("Corps de l'issue en markdown"),
         assignees: z.array(z.string()).optional().describe("Logins GitHub des assignés"),
-        project_number: z.number().optional().describe("Numéro du GitHub Project (ex: 14)"),
       },
     },
-    async ({ title, body, labels, assignees, project_number }) => {
-      const issue = await createIssue({ title, body, labels, assignees });
-      let projectMsg = "";
-      if (project_number !== undefined) {
-        try {
-          await addIssueToProject(issue.node_id, project_number);
-          projectMsg = ` Liée au project #${project_number}.`;
-        } catch (e) {
-          projectMsg = ` (Liaison project échouée : ${(e as Error).message})`;
-        }
-      }
+    async ({ title, description, assignees }) => {
+      const issue = await createIssue({ title, body: description, assignees });
+      const itemId = await addIssueToProject(issue.node_id);
       return {
-        content: [{ type: "text" as const, text: `Issue créée !\n\n**#${issue.number}** — ${issue.title}\n${issue.html_url}${projectMsg}` }],
+        content: [{ type: "text" as const, text: `Issue créée et ajoutée au projet !\n\n**#${issue.number}** — ${issue.title}\n${issue.html_url}\n\nProject item ID : \`${itemId}\`\n_(utilise \`set_project_field\` avec cet ID pour définir l'équipe)_` }],
+      };
+    }
+  );
+
+  server.registerTool(
+    "set_project_field",
+    {
+      description: "Définit un champ du GitHub Project LBA sur un item. À appeler après create_issue avec le project item ID retourné. Champs disponibles : status (a-faire, en-cours, en-revu-technique, pret-a-tester, terminer, bloquer) et team (Developer, Growth, UX/UI, Data, PO/PM, DevOps).",
+      inputSchema: {
+        item_id: z.string().describe("ID de l'item dans le projet (retourné par create_issue)"),
+        field: z.enum(["status", "team"]).describe("Champ à modifier"),
+        value: z.string().describe("Valeur : status → a-faire | en-cours | en-revu-technique | pret-a-tester | terminer | bloquer. team → Developer | Growth | UX/UI | Data | PO/PM | DevOps"),
+      },
+    },
+    async ({ item_id, field, value }) => {
+      await setProjectField(item_id, field, value);
+      return {
+        content: [{ type: "text" as const, text: `Champ "${field}" mis à jour → "${value}"` }],
       };
     }
   );
