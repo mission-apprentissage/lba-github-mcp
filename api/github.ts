@@ -4,30 +4,104 @@ const ORG = "mission-apprentissage";
 const REPO = "labonnealternance";
 const BASE = "https://api.github.com";
 
-const PROJECT_ID = "PVT_kwDOA8sl_s4BW3Li";
+export const PROJECT_ID = "PVT_kwDOA8sl_s4BW3Li";
 
-const FIELD_IDS = {
-  status: "PVTSSF_lADOA8sl_s4BW3LizhSIG_8",
-  team: "PVTSSF_lADOA8sl_s4BW3LizhSI6kM",
+export const SELECT_FIELD_IDS = {
+  status:   "PVTSSF_lADOA8sl_s4BW3LizhSIG_8",
+  team:     "PVTSSF_lADOA8sl_s4BW3LizhSI6kM",
+  epic:     "PVTSSF_lADOA8sl_s4BW3LizhSf8-U",
+  approver: "PVTSSF_lADOA8sl_s4BW3LizhSmLWU",
 } as const;
 
-const FIELD_OPTIONS: Record<keyof typeof FIELD_IDS, Record<string, string>> = {
+export const SPRINT_FIELD_ID = "PVTIF_lADOA8sl_s4BW3LizhSfYwQ";
+
+export const SELECT_OPTIONS: Record<keyof typeof SELECT_FIELD_IDS, Record<string, string>> = {
   status: {
-    "a-faire": "f75ad846",
-    "en-cours": "47fc9ee4",
-    "en-revu-technique": "df73e18b",
-    "pret-a-tester": "61e4505c",
-    "terminer": "98236657",
-    "bloquer": "57c7b9ce",
+    "a-faire":            "f75ad846",
+    "en-cours":           "47fc9ee4",
+    "en-revu-technique":  "df73e18b",
+    "pret-a-tester":      "61e4505c",
+    "terminer":           "98236657",
+    "bloquer":            "57c7b9ce",
   },
   team: {
     "Developer": "a7ade20a",
-    "Growth": "b632e42a",
-    "UX/UI": "21aaa6b4",
-    "Data": "d14ba891",
-    "PO/PM": "8ae35510",
-    "DevOps": "479e8a34",
+    "Growth":    "b632e42a",
+    "UX/UI":     "21aaa6b4",
+    "Data":      "d14ba891",
+    "PO/PM":     "8ae35510",
+    "DevOps":    "479e8a34",
   },
+  epic: {
+    "[SEO] Optimisation CTR & indexation": "84f0aa1f",
+    "API":                                  "2ed97a02",
+    "Accompagner les jeunes":               "8a7a1b33",
+    "Accompagner les recruteurs":           "ac35a981",
+    "Actions emploi jeunes en formation [AB]": "e5e6d5d8",
+    "Agrégation d'offres d'emploi":         "15b744f9",
+    "Amélioration de l'algorithme":         "8d8a5dc0",
+    "Augmenter la couverture des formations": "0f653b59",
+    "Authentification pro commune":         "f83ed08e",
+    "Automation envoie des emails d'acquisition Template 2": "77d406f6",
+    "BAL":                                  "61a8d3b9",
+    "Compte utilisateur":                   "d66e44aa",
+    "DATA":                                 "49409eb1",
+    "DevOps":                               "977b7034",
+    "Diffusion de l'information":           "a8399adc",
+    "Différentiation":                      "95157164",
+    "Documentation":                        "fdd8bef8",
+    "Déploiement":                          "9a8f5801",
+    "Dépôt d'offres":                       "912534ef",
+    "FAST":                                 "b27684db",
+    "Faire émerger les besoins en recrutements": "d6518bc1",
+    "Fiabilisation de la donnée":           "e0c66090",
+    "Fiabilisation design / ux":            "96753759",
+    "Fiabilisation technique":              "aee056c6",
+    "Gestion des formations":               "a42d8e59",
+    "Harmonisation technique":              "3c817300",
+    "Homologation":                         "13572993",
+    "Lutte contre la fraude":               "228faf7c",
+    "Maintenance/Dette tech":               "3aa8dbb3",
+    "Mesure de l'impact":                   "02e98097",
+    "Mise en relation Entreprise - CFA":    "335c256e",
+    "Mise en relation Jeune - CFA":         "0e1741c5",
+    "Mise en relation Jeune - Entreprise":  "92a394fd",
+    "Monitoring / Alerting":                "2809140a",
+    "Moteur de recherche et filtres":       "f1cdf1de",
+    "Multicompte":                          "8d87e893",
+    "Optimisation technique":               "3b1395b7",
+    "Orienter les candidats":               "088b865a",
+    "Parcours utilisateur pro":             "a6966783",
+    "Passation catalogue":                  "e508e0c2",
+    "Personnalisation de l'information":    "4293803f",
+    "Process équipe":                       "8ae4a845",
+    "RDVA":                                 "baa070bd",
+    "RGAA":                                 "658d56f7",
+    "RGPD":                                 "04aa915c",
+    "Rapprocher les services LBA":          "f68fca70",
+    "Recherche utilisateur":                "42790f91",
+    "SEO / GEO":                            "6dfd967e",
+    "Suggérer des offres complètes":        "eebf849c",
+    "Suivi des candidatures":               "7855c6f6",
+    "Support API":                          "3ea85dd2",
+    "Support utilisateur":                  "f4b435f5",
+    "Sécurité / Performances":              "ec537f9b",
+    "Tests":                                "82f3a13d",
+    "The Happy Path":                       "b814bf22",
+    "🌱 Green IT":                          "6bef5e61",
+  },
+  approver: {
+    "Aurélie": "d13b4250",
+    "Claire":  "706c109d",
+    "Kevin":   "7f271d5b",
+  },
+};
+
+export const SPRINT_OPTIONS: Record<string, string> = {
+  "Sprint 1": "ee0256b9",
+  "Sprint 2": "8969e93e",
+  "Sprint 3": "0b4a1c04",
+  "Sprint 4": "96cd93e7",
 };
 
 export interface GitHubIssue {
@@ -150,21 +224,33 @@ export async function addIssueToProject(issueNodeId: string): Promise<string> {
   const itemId = data.addProjectV2ItemById.item.id;
   await graphqlRequest(
     `mutation($pid:ID!,$iid:ID!,$fid:ID!,$oid:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$iid,fieldId:$fid,value:{singleSelectOptionId:$oid}}){projectV2Item{id}}}`,
-    { pid: PROJECT_ID, iid: itemId, fid: FIELD_IDS.status, oid: FIELD_OPTIONS.status["a-faire"] }
+    { pid: PROJECT_ID, iid: itemId, fid: SELECT_FIELD_IDS.status, oid: SELECT_OPTIONS.status["a-faire"] }
   );
   return itemId;
 }
 
-export async function setProjectField(itemId: string, field: keyof typeof FIELD_IDS, value: string): Promise<void> {
-  const fieldId = FIELD_IDS[field];
-  const optionId = FIELD_OPTIONS[field][value];
+export async function setSelectField(itemId: string, field: keyof typeof SELECT_FIELD_IDS, value: string): Promise<void> {
+  const fieldId = SELECT_FIELD_IDS[field];
+  const optionId = SELECT_OPTIONS[field][value];
   if (!optionId) {
-    const valid = Object.keys(FIELD_OPTIONS[field]).join(", ");
+    const valid = Object.keys(SELECT_OPTIONS[field]).join(", ");
     throw new Error(`Valeur "${value}" inconnue pour "${field}". Valeurs valides : ${valid}`);
   }
   await graphqlRequest(
     `mutation($pid:ID!,$iid:ID!,$fid:ID!,$oid:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$iid,fieldId:$fid,value:{singleSelectOptionId:$oid}}){projectV2Item{id}}}`,
     { pid: PROJECT_ID, iid: itemId, fid: fieldId, oid: optionId }
+  );
+}
+
+export async function setSprintField(itemId: string, sprint: string): Promise<void> {
+  const iterationId = SPRINT_OPTIONS[sprint];
+  if (!iterationId) {
+    const valid = Object.keys(SPRINT_OPTIONS).join(", ");
+    throw new Error(`Sprint "${sprint}" inconnu. Valeurs valides : ${valid}`);
+  }
+  await graphqlRequest(
+    `mutation($pid:ID!,$iid:ID!,$fid:ID!,$iter:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$iid,fieldId:$fid,value:{iterationId:$iter}}){projectV2Item{id}}}`,
+    { pid: PROJECT_ID, iid: itemId, fid: SPRINT_FIELD_ID, iter: iterationId }
   );
 }
 

@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setProjectField, listLabels, listMembers, listIssues } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, listLabels, listMembers, listIssues, SELECT_OPTIONS, SPRINT_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -32,18 +32,37 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "set_project_field",
     {
-      description: "Définit un champ du GitHub Project LBA sur un item. À appeler après create_issue avec le project item ID retourné. Champs disponibles : status (a-faire, en-cours, en-revu-technique, pret-a-tester, terminer, bloquer) et team (Developer, Growth, UX/UI, Data, PO/PM, DevOps).",
+      description: `Définit un champ du GitHub Project LBA sur un item. À appeler après create_issue avec le project item ID retourné.
+Champs disponibles :
+- status : ${Object.keys(SELECT_OPTIONS.status).join(" | ")}
+- team : ${Object.keys(SELECT_OPTIONS.team).join(" | ")}
+- epic : (liste complète via list_epics)
+- approver : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")}
+- sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")}`,
       inputSchema: {
         item_id: z.string().describe("ID de l'item dans le projet (retourné par create_issue)"),
-        field: z.enum(["status", "team"]).describe("Champ à modifier"),
-        value: z.string().describe("Valeur : status → a-faire | en-cours | en-revu-technique | pret-a-tester | terminer | bloquer. team → Developer | Growth | UX/UI | Data | PO/PM | DevOps"),
+        field: z.enum(["status", "team", "epic", "approver", "sprint"]).describe("Champ à modifier"),
+        value: z.string().describe("Valeur du champ (voir description pour les valeurs valides)"),
       },
     },
     async ({ item_id, field, value }) => {
-      await setProjectField(item_id, field, value);
+      if (field === "sprint") {
+        await setSprintField(item_id, value);
+      } else {
+        await setSelectField(item_id, field, value);
+      }
       return {
         content: [{ type: "text" as const, text: `Champ "${field}" mis à jour → "${value}"` }],
       };
+    }
+  );
+
+  server.registerTool(
+    "list_epics",
+    { description: "Liste toutes les epics disponibles dans le GitHub Project LBA." },
+    async () => {
+      const lines = Object.keys(SELECT_OPTIONS.epic).map((e) => `- ${e}`).join("\n");
+      return { content: [{ type: "text" as const, text: `Epics :\n\n${lines}` }] };
     }
   );
 
