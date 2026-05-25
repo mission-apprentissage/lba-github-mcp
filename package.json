@@ -1,0 +1,19 @@
+{
+  "name": "lba-github-mcp",
+  "version": "1.0.0",
+  "description": "MCP server — GitHub Issues pour mission-apprentissage/labonnealternance",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "typecheck": "tsc --noEmit",
+    "deploy": "vercel deploy --prod"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@vercel/node": "^5.8.4",
+    "typescript": "^6.0.3"
+  }
+}
