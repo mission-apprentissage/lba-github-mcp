@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, listLabels, listMembers, listIssues, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listLabels, listMembers, listIssues, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -76,10 +76,11 @@ function buildMcpServer(): McpServer {
 - epic : (liste complète via list_epics) → project item ID
 - approver : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")} → project item ID
 - sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")} → project item ID
-- priority : ${Object.keys(PRIORITY_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)`,
+- priority : ${Object.keys(PRIORITY_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)
+- type : ${Object.keys(TYPE_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)`,
       inputSchema: {
-        id: z.string().describe("Project item ID (retourné par create_issue) pour tous les champs sauf priority. Pour priority, utiliser l'issue node ID."),
-        field: z.enum(["status", "team", "epic", "approver", "sprint", "priority"]).describe("Champ à modifier"),
+        id: z.string().describe("Project item ID (retourné par create_issue) pour status/team/epic/approver/sprint. Issue node ID pour priority et type."),
+        field: z.enum(["status", "team", "epic", "approver", "sprint", "priority", "type"]).describe("Champ à modifier"),
         value: z.string().describe("Valeur du champ (voir description pour les valeurs valides)"),
       },
     },
@@ -88,6 +89,8 @@ function buildMcpServer(): McpServer {
         await setPriorityField(id, value);
       } else if (field === "sprint") {
         await setSprintField(id, value);
+      } else if (field === "type") {
+        await setIssueType(id, value);
       } else {
         await setSelectField(id, field, value);
       }
@@ -95,6 +98,44 @@ function buildMcpServer(): McpServer {
         content: [{ type: "text" as const, text: `Champ "${field}" mis à jour → "${value}"` }],
       };
 
+    }
+  );
+
+  server.registerTool(
+    "update_issue",
+    {
+      description: `Met à jour un ou plusieurs champs d'une issue GitHub existante (titre, description, assignees, champs du Project LBA). Ne fournir que les champs à modifier.`,
+      inputSchema: {
+        issue_number: z.number().int().positive().describe("Numéro de l'issue GitHub"),
+        title: z.string().optional().describe("Nouveau titre"),
+        description: z.string().optional().describe("Nouveau corps en markdown"),
+        assignees: z.array(z.string()).optional().describe("Nouveaux assignés (remplace la liste existante)"),
+        status: z.string().optional().describe(`Statut dans le Project : ${Object.keys(SELECT_OPTIONS.status).join(" | ")}`),
+        team: z.string().optional().describe(`Équipe : ${Object.keys(SELECT_OPTIONS.team).join(" | ")}`),
+        epic: z.string().optional().describe("Epic (valeurs via list_epics)"),
+        approver: z.string().optional().describe(`Approbateur : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")}`),
+        sprint: z.string().optional().describe(`Sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")}`),
+        priority: z.string().optional().describe(`Priorité : ${Object.keys(PRIORITY_OPTIONS).join(" | ")}`),
+        type: z.string().optional().describe(`Type : ${Object.keys(TYPE_OPTIONS).join(" | ")}`),
+      },
+    },
+    async ({ issue_number, title, description, assignees, status, team, epic, approver, sprint, priority, type }) => {
+      const issue = await updateIssue({
+        issueNumber: issue_number,
+        title,
+        body: description,
+        assignees,
+        status,
+        team,
+        epic,
+        approver,
+        sprint,
+        priority,
+        type,
+      });
+      return {
+        content: [{ type: "text" as const, text: `Issue #${issue.number} mise à jour.\n${issue.html_url}` }],
+      };
     }
   );
 

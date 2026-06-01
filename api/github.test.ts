@@ -6,6 +6,9 @@ import {
   setSelectField,
   setPriorityField,
   setSprintField,
+  setIssueType,
+  getIssueContext,
+  updateIssue,
   resolveIssueNodeIds,
   addSubIssue,
   addBlockedByRelationship,
@@ -13,6 +16,7 @@ import {
   SELECT_OPTIONS,
   PRIORITY_OPTIONS,
   SPRINT_OPTIONS,
+  TYPE_OPTIONS,
   PROJECT_ID,
   SELECT_FIELD_IDS,
   SPRINT_FIELD_ID,
@@ -233,5 +237,130 @@ describe("addBlockedByRelationship", () => {
     expect(body.query).toContain("BLOCKED_BY");
     expect(body.variables.iid).toBe("ISSUE_NI");
     expect(body.variables.rid).toBe("BLOCKER_NI");
+  });
+});
+
+// ─── setIssueType ────────────────────────────────────────────────────────────
+
+describe("setIssueType", () => {
+  it("appelle updateIssue avec le bon issueTypeId", async () => {
+    mockFetch(...withToken({ data: {} }));
+
+    await setIssueType("NI_42", "Bug");
+
+    const [, opts] = fetchCalls()[1];
+    const body = JSON.parse(opts.body);
+    expect(body.query).toContain("updateIssue");
+    expect(body.variables.iid).toBe("NI_42");
+    expect(body.variables.tid).toBe(TYPE_OPTIONS["Bug"]);
+  });
+
+  it("lève une erreur pour un type inconnu", async () => {
+    mockFetch(...withToken({}));
+    await expect(setIssueType("NI_42", "Epic")).rejects.toThrow('Type "Epic" inconnu');
+  });
+});
+
+// ─── getIssueContext ──────────────────────────────────────────────────────────
+
+const CONTEXT_GQL_RESPONSE = {
+  data: {
+    repository: {
+      issue: {
+        id: "NI_42",
+        projectItems: {
+          nodes: [{ id: "ITEM_42", project: { id: PROJECT_ID } }],
+        },
+      },
+    },
+  },
+};
+
+describe("getIssueContext", () => {
+  it("retourne nodeId et projectItemId via GraphQL", async () => {
+    mockFetch(TOKEN_RESPONSE, CONTEXT_GQL_RESPONSE);
+
+    const ctx = await getIssueContext(42);
+    expect(ctx.nodeId).toBe("NI_42");
+    expect(ctx.projectItemId).toBe("ITEM_42");
+  });
+
+  it("retourne projectItemId null si l'issue n'est pas dans le project", async () => {
+    mockFetch(TOKEN_RESPONSE, {
+      data: { repository: { issue: { id: "NI_99", projectItems: { nodes: [] } } } },
+    });
+
+    const ctx = await getIssueContext(99);
+    expect(ctx.nodeId).toBe("NI_99");
+    expect(ctx.projectItemId).toBeNull();
+  });
+});
+
+// ─── updateIssue ─────────────────────────────────────────────────────────────
+
+describe("updateIssue", () => {
+  it("PATCH title + body seuls (pas de query GraphQL context)", async () => {
+    const issuePayload = { number: 10, title: "Nouveau titre", html_url: "https://github.com/x/10", node_id: "NI_10" };
+    mockFetch(...withToken(issuePayload));
+
+    const result = await updateIssue({ issueNumber: 10, title: "Nouveau titre", body: "desc" });
+
+    expect(result.number).toBe(10);
+    const calls = fetchCalls();
+    // token + 1 seul appel REST (pas de context query)
+    expect(calls).toHaveLength(2);
+    const [url, opts] = calls[1];
+    expect(url).toContain("/issues/10");
+    expect(opts.method).toBe("PATCH");
+    const body = JSON.parse(opts.body);
+    expect(body.title).toBe("Nouveau titre");
+    expect(body.body).toBe("desc");
+  });
+
+  it("met à jour status + priority : résout le context puis dispatch en parallèle", async () => {
+    const issuePayload = { number: 42, title: "T", html_url: "https://github.com/x/42", node_id: "NI_42" };
+    mockFetch(
+      TOKEN_RESPONSE,
+      CONTEXT_GQL_RESPONSE,                     // getIssueContext
+      { data: {} },                              // setSelectField (status)
+      { data: {} },                              // setPriorityField
+      issuePayload,                              // GET final (pas de PATCH REST)
+    );
+
+    await updateIssue({ issueNumber: 42, status: "en-cours", priority: "High" });
+
+    const calls = fetchCalls();
+    // token + context + status + priority + GET
+    expect(calls).toHaveLength(5);
+    const statusBody = JSON.parse(calls[2][1].body);
+    expect(statusBody.variables.oid).toBe(SELECT_OPTIONS.status["en-cours"]);
+    const priorityBody = JSON.parse(calls[3][1].body);
+    expect(priorityBody.variables.oid).toBe(PRIORITY_OPTIONS["High"]);
+    expect(calls[4][0]).toContain("/issues/42");
+    expect(calls[4][1].method).toBe("GET");
+  });
+
+  it("met à jour title + status en même temps", async () => {
+    const issuePayload = { number: 7, title: "T", html_url: "https://github.com/x/7", node_id: "NI_7" };
+    mockFetch(
+      TOKEN_RESPONSE,
+      CONTEXT_GQL_RESPONSE,   // getIssueContext
+      issuePayload,            // REST PATCH
+      { data: {} },            // setSelectField (status)
+    );
+
+    const result = await updateIssue({ issueNumber: 7, title: "T", status: "terminer" });
+    expect(result.number).toBe(7);
+  });
+
+  it("lève une erreur si aucun champ fourni", async () => {
+    await expect(updateIssue({ issueNumber: 1 })).rejects.toThrow("Au moins un champ à mettre à jour est requis");
+  });
+
+  it("lève une erreur si issue non associée au project lors d'une mise à jour de champ project", async () => {
+    mockFetch(TOKEN_RESPONSE, {
+      data: { repository: { issue: { id: "NI_1", projectItems: { nodes: [] } } } },
+    });
+    await expect(updateIssue({ issueNumber: 1, status: "en-cours" })).rejects.toThrow("n'est pas associée au GitHub Project");
   });
 });

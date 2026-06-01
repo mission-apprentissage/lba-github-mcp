@@ -106,6 +106,12 @@ export const PRIORITY_OPTIONS: Record<string, string> = {
   "Low":    "IFSSO_kgDOAap2pw",
 };
 
+export const TYPE_OPTIONS: Record<string, string> = {
+  "Feature": "IT_kwDOA8sl_s4AuQVi",
+  "Bug":     "IT_kwDOA8sl_s4AuQVg",
+  "Task":    "IT_kwDOA8sl_s4AuQVe",
+};
+
 export const SPRINT_OPTIONS: Record<string, string> = {
   "Sprint 1": "ee0256b9",
   "Sprint 2": "8969e93e",
@@ -264,6 +270,95 @@ export async function setPriorityField(issueNodeId: string, priority: string): P
     `mutation($iid:ID!,$fid:ID!,$oid:ID!){setIssueFieldValue(input:{issueId:$iid,issueFields:[{fieldId:$fid,singleSelectOptionId:$oid}]}){issue{number}}}`,
     { iid: issueNodeId, fid: PRIORITY_FIELD_ID, oid: optionId }
   );
+}
+
+export async function setIssueType(issueNodeId: string, type: string): Promise<void> {
+  const typeId = TYPE_OPTIONS[type];
+  if (!typeId) {
+    const valid = Object.keys(TYPE_OPTIONS).join(", ");
+    throw new Error(`Type "${type}" inconnu. Valeurs valides : ${valid}`);
+  }
+  await graphqlRequest(
+    `mutation($iid:ID!,$tid:ID!){updateIssue(input:{id:$iid,issueTypeId:$tid}){issue{id}}}`,
+    { iid: issueNodeId, tid: typeId }
+  );
+}
+
+export interface IssueContext {
+  nodeId: string;
+  projectItemId: string | null;
+}
+
+export async function getIssueContext(issueNumber: number): Promise<IssueContext> {
+  type Result = { repository: { issue: { id: string; projectItems: { nodes: { id: string; project: { id: string } }[] } } } };
+  const data = await graphqlRequest<Result>(
+    `query($owner:String!,$repo:String!,$num:Int!,$pid:ID!){repository(owner:$owner,name:$repo){issue(number:$num){id projectItems(first:10){nodes{id project{id}}}}}}`,
+    { owner: ORG, repo: REPO, num: issueNumber, pid: PROJECT_ID }
+  );
+  const issue = data.repository.issue;
+  const item = issue.projectItems.nodes.find((n) => n.project.id === PROJECT_ID) ?? null;
+  return { nodeId: issue.id, projectItemId: item?.id ?? null };
+}
+
+export type UpdateIssueFields = {
+  issueNumber: number;
+  title?: string;
+  body?: string;
+  assignees?: string[];
+  status?: string;
+  team?: string;
+  epic?: string;
+  approver?: string;
+  sprint?: string;
+  priority?: string;
+  type?: string;
+};
+
+export async function updateIssue(params: UpdateIssueFields): Promise<GitHubIssue> {
+  const { issueNumber, title, body, assignees, status, team, epic, approver, sprint, priority, type } = params;
+
+  const restFields = { title, body, assignees };
+  const hasRestUpdate = Object.values(restFields).some((v) => v !== undefined);
+  const projectSelectFields = { status, team, epic, approver } as const;
+  const hasProjectUpdate = Object.values(projectSelectFields).some((v) => v !== undefined) || sprint !== undefined;
+  const hasIssueFieldUpdate = priority !== undefined || type !== undefined;
+
+  if (!hasRestUpdate && !hasProjectUpdate && !hasIssueFieldUpdate) {
+    throw new Error("Au moins un champ à mettre à jour est requis");
+  }
+
+  // Résoudre node ID + project item ID en une seule query si besoin
+  let ctx: IssueContext | null = null;
+  if (hasProjectUpdate || hasIssueFieldUpdate) {
+    ctx = await getIssueContext(issueNumber);
+    if (hasProjectUpdate && !ctx.projectItemId) {
+      throw new Error(`Issue #${issueNumber} n'est pas associée au GitHub Project`);
+    }
+  }
+
+  const ops: Promise<unknown>[] = [];
+
+  if (hasRestUpdate) {
+    const payload: Record<string, unknown> = {};
+    if (title !== undefined) payload.title = title;
+    if (body !== undefined) payload.body = body;
+    if (assignees !== undefined) payload.assignees = assignees;
+    ops.push(restRequest<GitHubIssue>(`/repos/${ORG}/${REPO}/issues/${issueNumber}`, "PATCH", payload));
+  }
+
+  if (ctx) {
+    for (const [field, value] of Object.entries(projectSelectFields)) {
+      if (value !== undefined) ops.push(setSelectField(ctx.projectItemId!, field as keyof typeof SELECT_FIELD_IDS, value));
+    }
+    if (sprint !== undefined) ops.push(setSprintField(ctx.projectItemId!, sprint));
+    if (priority !== undefined) ops.push(setPriorityField(ctx.nodeId, priority));
+    if (type !== undefined) ops.push(setIssueType(ctx.nodeId, type));
+  }
+
+  const results = await Promise.all(ops);
+  // Le résultat REST (GitHubIssue) est toujours le premier si présent, sinon on refetch
+  if (hasRestUpdate) return results[0] as GitHubIssue;
+  return restRequest<GitHubIssue>(`/repos/${ORG}/${REPO}/issues/${issueNumber}`, "GET");
 }
 
 export async function setSprintField(itemId: string, sprint: string): Promise<void> {
