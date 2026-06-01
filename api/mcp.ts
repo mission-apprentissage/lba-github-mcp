@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, listLabels, listMembers, listIssues, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, listLabels, listMembers, listIssues, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -18,14 +18,52 @@ function buildMcpServer(): McpServer {
         title: z.string().describe("Titre de l'issue"),
         description: z.string().optional().describe("Corps de l'issue en markdown"),
         assignees: z.array(z.string()).optional().describe("Logins GitHub des assignés"),
+        parent_issue_number: z.number().optional().describe("Numéro de l'issue parente (rattache l'issue créée comme sub-issue)"),
+        blocked_by: z.array(z.number()).optional().describe("Numéros des issues qui bloquent l'issue créée"),
       },
     },
-    async ({ title, description, assignees }) => {
+    async ({ title, description, assignees, parent_issue_number, blocked_by }) => {
       const issue = await createIssue({ title, body: description, assignees });
       const itemId = await addIssueToProject(issue.node_id);
-      return {
-        content: [{ type: "text" as const, text: `Issue créée et ajoutée au projet !\n\n**#${issue.number}** — ${issue.title}\n${issue.html_url}\n\nProject item ID : \`${itemId}\` _(status, team, epic, approver, sprint)_\nIssue node ID : \`${issue.node_id}\` _(priority)_` }],
-      };
+
+      // Résolution des node IDs en une seule query
+      const numbersToResolve = [
+        ...(parent_issue_number ? [parent_issue_number] : []),
+        ...(blocked_by ?? []),
+      ];
+      const nodeIds = numbersToResolve.length ? await resolveIssueNodeIds(numbersToResolve) : {};
+
+      let parentIssueUrl: string | undefined;
+      if (parent_issue_number) {
+        const parentNodeId = nodeIds[parent_issue_number];
+        if (parentNodeId) {
+          await addSubIssue(parentNodeId, issue.node_id);
+          parentIssueUrl = `https://github.com/mission-apprentissage/labonnealternance/issues/${parent_issue_number}`;
+        }
+      }
+
+      const linkedBlockers: number[] = [];
+      for (const blockerNum of blocked_by ?? []) {
+        const blockerNodeId = nodeIds[blockerNum];
+        if (blockerNodeId) {
+          await addBlockedByRelationship(issue.node_id, blockerNodeId);
+          linkedBlockers.push(blockerNum);
+        }
+      }
+
+      const lines = [
+        `Issue créée et ajoutée au projet !`,
+        ``,
+        `**#${issue.number}** — ${issue.title}`,
+        issue.html_url,
+        ``,
+        `Project item ID : \`${itemId}\` _(status, team, epic, approver, sprint)_`,
+        `Issue node ID : \`${issue.node_id}\` _(priority)_`,
+      ];
+      if (parentIssueUrl) lines.push(`Parent : ${parentIssueUrl}`);
+      if (linkedBlockers.length) lines.push(`Blocked by : ${linkedBlockers.map((n) => `#${n}`).join(", ")}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 

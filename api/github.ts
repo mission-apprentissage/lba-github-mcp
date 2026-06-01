@@ -131,6 +131,9 @@ export interface GitHubMember {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+/** Test-only: invalidates the token cache so the next call re-fetches. */
+export function _resetTokenCache() { cachedToken = null; }
+
 function generateJWT(): string {
   const appId = process.env.GITHUB_APP_ID;
   const privateKeyB64 = process.env.GITHUB_PRIVATE_KEY;
@@ -272,6 +275,34 @@ export async function setSprintField(itemId: string, sprint: string): Promise<vo
   await graphqlRequest(
     `mutation($pid:ID!,$iid:ID!,$fid:ID!,$iter:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$iid,fieldId:$fid,value:{iterationId:$iter}}){projectV2Item{id}}}`,
     { pid: PROJECT_ID, iid: itemId, fid: SPRINT_FIELD_ID, iter: iterationId }
+  );
+}
+
+export async function resolveIssueNodeIds(issueNumbers: number[]): Promise<Record<number, string>> {
+  if (!issueNumbers.length) return {};
+  const aliases = issueNumbers.map((n, i) => `i${i}: issue(number: ${n}) { id }`).join("\n    ");
+  const query = `query { repository(owner: "${ORG}", name: "${REPO}") {\n    ${aliases}\n  } }`;
+  type RepoResult = { repository: Record<string, { id: string }> };
+  const data = await graphqlRequest<RepoResult>(query, {});
+  const result: Record<number, string> = {};
+  issueNumbers.forEach((n, i) => {
+    const node = data.repository[`i${i}`];
+    if (node) result[n] = node.id;
+  });
+  return result;
+}
+
+export async function addSubIssue(parentNodeId: string, subIssueNodeId: string): Promise<void> {
+  await graphqlRequest(
+    `mutation($pid:ID!,$sid:ID!){addSubIssue(input:{issueId:$pid,subIssueId:$sid}){issue{id}subIssue{id}}}`,
+    { pid: parentNodeId, sid: subIssueNodeId }
+  );
+}
+
+export async function addBlockedByRelationship(issueNodeId: string, blockerNodeId: string): Promise<void> {
+  await graphqlRequest(
+    `mutation($iid:ID!,$rid:ID!){addIssueRelationship(input:{issueId:$iid,relatedIssueId:$rid,relationshipType:BLOCKED_BY}){relationship{type}}}`,
+    { iid: issueNodeId, rid: blockerNodeId }
   );
 }
 
