@@ -386,16 +386,18 @@ function makeProjectPage(items: object[], hasNextPage = false, endCursor = "curs
 function makeProjectItem(issueNumber: number, overrides: {
   status?: string; team?: string; sprint?: string;
   type?: string; priority?: string; state?: string;
+  sprintStartDate?: string; sprintDuration?: number;
 } = {}) {
   const { status = "a-faire", team = "Developer", sprint = "Sprint 3",
-          type = "Bug", priority = "High", state = "OPEN" } = overrides;
+          type = "Bug", priority = "High", state = "OPEN",
+          sprintStartDate = "2026-06-02", sprintDuration = 14 } = overrides;
   return {
     id: `ITEM_${issueNumber}`,
     fieldValues: {
       nodes: [
         { field: { name: "Status" }, name: status },
         { field: { name: "Team" }, name: team },
-        { field: { name: "Sprint" }, title: sprint },
+        { field: { name: "Sprint" }, title: sprint, startDate: sprintStartDate, duration: sprintDuration },
       ],
     },
     content: {
@@ -487,6 +489,18 @@ describe("listProjectItems", () => {
     const [item] = await listProjectItems();
     expect(item.item_id).toBe("ITEM_10");
     expect(item.issue_node_id).toBe("NI_10");
+  });
+
+  it("expose les dates de l'itération sprint", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([makeProjectItem(1, { sprintStartDate: "2026-06-02", sprintDuration: 14 })])
+    );
+
+    const [item] = await listProjectItems();
+    expect(item.sprint_start_date).toBe("2026-06-02");
+    expect(item.sprint_duration_days).toBe(14);
+    expect(item.sprint_end_date).toBe("2026-06-16");
   });
 });
 

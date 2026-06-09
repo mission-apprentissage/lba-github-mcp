@@ -142,7 +142,7 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "list_project_items",
     {
-      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles : ${Object.keys(SPRINT_OPTIONS).join(" | ")}.`,
+      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint, sprint_start_date, sprint_end_date, sprint_duration_days) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles : ${Object.keys(SPRINT_OPTIONS).join(" | ")}.`,
       inputSchema: {
         sprint: z.string().optional().describe(`Filtrer par sprint (ex. "Sprint 3"). Si absent, retourne tous les items.`),
         limit: z.number().optional().default(200).describe("Nombre max d'items (défaut : 200)"),

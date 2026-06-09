@@ -414,6 +414,9 @@ export interface ProjectItem {
   type: string | null;
   priority: string | null;
   sprint: string | null;
+  sprint_start_date: string | null;
+  sprint_end_date: string | null;
+  sprint_duration_days: number | null;
 }
 
 export async function listProjectItems(sprint?: string, limit = 200): Promise<ProjectItem[]> {
@@ -434,6 +437,8 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
                   ... on ProjectV2ItemFieldIterationValue{
                     field{... on ProjectV2FieldCommon{name}}
                     title
+                    startDate
+                    duration
                   }
                 }
               }
@@ -457,9 +462,16 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
       }
     }`;
 
+  type RawFieldValue = {
+    field?: { name: string };
+    name?: string;
+    title?: string;
+    startDate?: string;
+    duration?: number;
+  };
   type RawItem = {
     id: string;
-    fieldValues: { nodes: { field?: { name: string }; name?: string; title?: string }[] };
+    fieldValues: { nodes: RawFieldValue[] };
     content: {
       id: string; number: number; title: string; url: string; body: string; state: string;
       issueType?: { name: string };
@@ -479,14 +491,25 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
       if (!node.content) continue;
 
       const projectFields: Record<string, string> = {};
-      for (const fv of node.fieldValues.nodes as { field?: { name: string }; name?: string; title?: string }[]) {
+      let sprintIteration: { startDate: string; duration: number } | null = null;
+      for (const fv of node.fieldValues.nodes) {
         if (fv.field?.name && (fv.name || fv.title)) {
           projectFields[fv.field.name] = (fv.name ?? fv.title)!;
+        }
+        if (fv.field?.name === "Sprint" && fv.startDate && typeof fv.duration === "number") {
+          sprintIteration = { startDate: fv.startDate, duration: fv.duration };
         }
       }
 
       const sprintValue = projectFields["Sprint"] ?? null;
       if (sprint && sprintValue !== sprint) continue;
+
+      let sprintEndDate: string | null = null;
+      if (sprintIteration) {
+        const start = new Date(sprintIteration.startDate + "T00:00:00Z");
+        start.setUTCDate(start.getUTCDate() + sprintIteration.duration);
+        sprintEndDate = start.toISOString().slice(0, 10);
+      }
 
       const issuePriority = node.content.fieldValues.nodes
         .find((fv) => fv.field?.id === PRIORITY_FIELD_ID)?.name ?? null;
@@ -504,6 +527,9 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
         type:         node.content.issueType?.name ?? null,
         priority:     issuePriority,
         sprint:       sprintValue,
+        sprint_start_date:    sprintIteration?.startDate ?? null,
+        sprint_end_date:      sprintEndDate,
+        sprint_duration_days: sprintIteration?.duration ?? null,
       });
 
       if (items.length >= limit) break;
