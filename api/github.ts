@@ -401,6 +401,175 @@ export async function addBlockedByRelationship(issueNodeId: string, blockerNodeI
   );
 }
 
+export interface ProjectItem {
+  item_id: string;
+  issue_number: number;
+  issue_node_id: string;
+  title: string;
+  url: string;
+  body: string;
+  state: string;
+  status: string | null;
+  team: string | null;
+  type: string | null;
+  priority: string | null;
+  sprint: string | null;
+}
+
+export async function listProjectItems(sprint?: string, limit = 200): Promise<ProjectItem[]> {
+  const query = `
+    query($pid:ID!,$cursor:String){
+      node(id:$pid){
+        ... on ProjectV2 {
+          items(first:100,after:$cursor){
+            pageInfo{hasNextPage endCursor}
+            nodes{
+              id
+              fieldValues(first:15){
+                nodes{
+                  ... on ProjectV2ItemFieldSingleSelectValue{
+                    field{... on ProjectV2FieldCommon{name}}
+                    name
+                  }
+                  ... on ProjectV2ItemFieldIterationValue{
+                    field{... on ProjectV2FieldCommon{name}}
+                    title
+                  }
+                }
+              }
+              content{
+                ... on Issue{
+                  id number title url body state
+                  issueType{name}
+                  fieldValues(first:5){
+                    nodes{
+                      ... on IssueFieldSingleSelectValue{
+                        field{... on IssueFieldSingleSelect{name}}
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }`;
+
+  type RawItem = {
+    id: string;
+    fieldValues: { nodes: { field?: { name: string }; name?: string; title?: string }[] };
+    content: {
+      id: string; number: number; title: string; url: string; body: string; state: string;
+      issueType?: { name: string };
+      fieldValues: { nodes: { field?: { name: string }; name?: string }[] };
+    } | null;
+  };
+  type Result = { node: { items: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: RawItem[] } } };
+
+  const items: ProjectItem[] = [];
+  let cursor: string | null = null;
+
+  while (items.length < limit) {
+    const data: Result = await graphqlRequest<Result>(query, { pid: PROJECT_ID, cursor });
+    const page: Result["node"]["items"] = data.node.items;
+
+    for (const node of page.nodes) {
+      if (!node.content) continue;
+
+      const projectFields: Record<string, string> = {};
+      for (const fv of node.fieldValues.nodes as { field?: { name: string }; name?: string; title?: string }[]) {
+        if (fv.field?.name && (fv.name || fv.title)) {
+          projectFields[fv.field.name] = (fv.name ?? fv.title)!;
+        }
+      }
+
+      const sprintValue = projectFields["Sprint"] ?? null;
+      if (sprint && sprintValue !== sprint) continue;
+
+      const issuePriority = node.content.fieldValues.nodes
+        .find((fv) => fv.field?.name === "Priority")?.name ?? null;
+
+      items.push({
+        item_id:      node.id,
+        issue_number: node.content.number,
+        issue_node_id: node.content.id,
+        title:        node.content.title,
+        url:          node.content.url,
+        body:         node.content.body ?? "",
+        state:        node.content.state,
+        status:       projectFields["Status"] ?? null,
+        team:         projectFields["Team"] ?? null,
+        type:         node.content.issueType?.name ?? null,
+        priority:     issuePriority,
+        sprint:       sprintValue,
+      });
+
+      if (items.length >= limit) break;
+    }
+
+    if (!page.pageInfo.hasNextPage || items.length >= limit) break;
+    cursor = page.pageInfo.endCursor;
+  }
+
+  return items;
+}
+
+export interface StatusHistoryEntry {
+  from_status: string;
+  to_status: string;
+  entered_at: string;
+  duration_seconds: number | null;
+}
+
+export interface IssueStatusHistory {
+  issue_number: number;
+  history: StatusHistoryEntry[];
+}
+
+export async function listStatusHistory(issueNumbers: number[]): Promise<IssueStatusHistory[]> {
+  if (!issueNumbers.length) return [];
+
+  const CHUNK = 50;
+  const results: IssueStatusHistory[] = [];
+
+  for (let i = 0; i < issueNumbers.length; i += CHUNK) {
+    const chunk = issueNumbers.slice(i, i + CHUNK);
+    const aliases = chunk
+      .map((n, j) => `i${j}: issue(number:${n}){number timelineItems(first:50,itemTypes:[PROJECT_V2_ITEM_STATUS_CHANGED_EVENT]){nodes{... on ProjectV2ItemStatusChangedEvent{createdAt previousStatus status project{id}}}}}`)
+      .join(" ");
+    const query = `query{repository(owner:"${ORG}",name:"${REPO}"){${aliases}}}`;
+
+    type IssueNode = {
+      number: number;
+      timelineItems: { nodes: { createdAt: string; previousStatus: string; status: string; project: { id: string } }[] };
+    };
+    const data = await graphqlRequest<{ repository: Record<string, IssueNode> }>(query, {});
+
+    for (let j = 0; j < chunk.length; j++) {
+      const issue = data.repository[`i${j}`];
+      if (!issue) continue;
+
+      const events = issue.timelineItems.nodes
+        .filter((e) => e.project.id === PROJECT_ID)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+      const history: StatusHistoryEntry[] = events.map((e, idx) => {
+        const next = events[idx + 1];
+        const duration = next
+          ? Math.round((new Date(next.createdAt).getTime() - new Date(e.createdAt).getTime()) / 1000)
+          : null;
+        return { from_status: e.previousStatus, to_status: e.status, entered_at: e.createdAt, duration_seconds: duration };
+      });
+
+      results.push({ issue_number: issue.number, history });
+    }
+  }
+
+  return results;
+}
+
 export function listLabels(): Promise<GitHubLabel[]> {
   return paginate<GitHubLabel>(`/repos/${ORG}/${REPO}/labels`);
 }

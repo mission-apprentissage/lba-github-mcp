@@ -9,6 +9,8 @@ import {
   setIssueType,
   getIssueContext,
   updateIssue,
+  listProjectItems,
+  listStatusHistory,
   resolveIssueNodeIds,
   addSubIssue,
   addBlockedByRelationship,
@@ -362,5 +364,214 @@ describe("updateIssue", () => {
       data: { repository: { issue: { id: "NI_1", projectItems: { nodes: [] } } } },
     });
     await expect(updateIssue({ issueNumber: 1, status: "en-cours" })).rejects.toThrow("n'est pas associée au GitHub Project");
+  });
+});
+
+// ─── listProjectItems ─────────────────────────────────────────────────────────
+
+function makeProjectPage(items: object[], hasNextPage = false, endCursor = "cursor1") {
+  return {
+    data: {
+      node: {
+        items: {
+          pageInfo: { hasNextPage, endCursor },
+          nodes: items,
+        },
+      },
+    },
+  };
+}
+
+function makeProjectItem(issueNumber: number, overrides: {
+  status?: string; team?: string; sprint?: string;
+  type?: string; priority?: string; state?: string;
+} = {}) {
+  const { status = "a-faire", team = "Developer", sprint = "Sprint 3",
+          type = "Bug", priority = "High", state = "OPEN" } = overrides;
+  return {
+    id: `ITEM_${issueNumber}`,
+    fieldValues: {
+      nodes: [
+        { field: { name: "Status" }, name: status },
+        { field: { name: "Team" }, name: team },
+        { field: { name: "Sprint" }, title: sprint },
+      ],
+    },
+    content: {
+      id: `NI_${issueNumber}`,
+      number: issueNumber,
+      title: `Issue ${issueNumber}`,
+      url: `https://github.com/x/${issueNumber}`,
+      body: "Description",
+      state,
+      issueType: { name: type },
+      fieldValues: {
+        nodes: [{ field: { name: "Priority" }, name: priority }],
+      },
+    },
+  };
+}
+
+describe("listProjectItems", () => {
+  it("retourne les items filtrés par sprint", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([
+        makeProjectItem(1, { sprint: "Sprint 3" }),
+        makeProjectItem(2, { sprint: "Sprint 2" }),
+        makeProjectItem(3, { sprint: "Sprint 3", status: "terminer" }),
+      ])
+    );
+
+    const items = await listProjectItems("Sprint 3");
+
+    expect(items).toHaveLength(2);
+    expect(items[0].issue_number).toBe(1);
+    expect(items[0].sprint).toBe("Sprint 3");
+    expect(items[0].status).toBe("a-faire");
+    expect(items[0].team).toBe("Developer");
+    expect(items[0].type).toBe("Bug");
+    expect(items[0].priority).toBe("High");
+    expect(items[1].issue_number).toBe(3);
+    expect(items[1].status).toBe("terminer");
+  });
+
+  it("retourne tous les items si sprint non fourni", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([
+        makeProjectItem(1, { sprint: "Sprint 3" }),
+        makeProjectItem(2, { sprint: "Sprint 2" }),
+      ])
+    );
+
+    const items = await listProjectItems();
+    expect(items).toHaveLength(2);
+  });
+
+  it("ignore les items sans contenu (PRs)", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([
+        makeProjectItem(1),
+        { id: "ITEM_PR", fieldValues: { nodes: [] }, content: null },
+      ])
+    );
+
+    const items = await listProjectItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].issue_number).toBe(1);
+  });
+
+  it("pagine si hasNextPage = true", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([makeProjectItem(1)], true, "c1"),
+      makeProjectPage([makeProjectItem(2)], false),
+    );
+
+    const items = await listProjectItems();
+    expect(items).toHaveLength(2);
+
+    const calls = fetchCalls();
+    // 2 appels GraphQL (+ 1 token)
+    expect(calls).toHaveLength(3);
+    const secondCall = JSON.parse(calls[2][1].body);
+    expect(secondCall.variables.cursor).toBe("c1");
+  });
+
+  it("expose item_id et issue_node_id", async () => {
+    mockFetch(TOKEN_RESPONSE, makeProjectPage([makeProjectItem(10)]));
+
+    const [item] = await listProjectItems();
+    expect(item.item_id).toBe("ITEM_10");
+    expect(item.issue_node_id).toBe("NI_10");
+  });
+});
+
+// ─── listStatusHistory ────────────────────────────────────────────────────────
+
+function makeStatusEvent(createdAt: string, previousStatus: string, status: string, projectId = PROJECT_ID) {
+  return { createdAt, previousStatus, status, project: { id: projectId } };
+}
+
+describe("listStatusHistory", () => {
+  it("retourne un tableau vide sans appeler fetch si aucun numéro", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const result = await listStatusHistory([]);
+    expect(result).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("retourne l'historique trié avec les durées calculées", async () => {
+    const t1 = "2026-06-01T10:00:00Z";
+    const t2 = "2026-06-01T11:00:00Z"; // +3600s
+    const t3 = "2026-06-01T12:30:00Z"; // +5400s
+    mockFetch(TOKEN_RESPONSE, {
+      data: {
+        repository: {
+          i0: {
+            number: 42,
+            timelineItems: {
+              nodes: [
+                makeStatusEvent(t1, "", "a-faire"),
+                makeStatusEvent(t3, "en-cours", "terminer"),
+                makeStatusEvent(t2, "a-faire", "en-cours"), // volontairement désordre
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const [result] = await listStatusHistory([42]);
+    expect(result.issue_number).toBe(42);
+    expect(result.history).toHaveLength(3);
+    // trié par createdAt
+    expect(result.history[0]).toMatchObject({ from_status: "", to_status: "a-faire", duration_seconds: 3600 });
+    expect(result.history[1]).toMatchObject({ from_status: "a-faire", to_status: "en-cours", duration_seconds: 5400 });
+    expect(result.history[2]).toMatchObject({ from_status: "en-cours", to_status: "terminer", duration_seconds: null });
+  });
+
+  it("filtre les events des autres projets", async () => {
+    mockFetch(TOKEN_RESPONSE, {
+      data: {
+        repository: {
+          i0: {
+            number: 1,
+            timelineItems: {
+              nodes: [
+                makeStatusEvent("2026-06-01T10:00:00Z", "", "a-faire", PROJECT_ID),
+                makeStatusEvent("2026-06-01T11:00:00Z", "", "other-status", "OTHER_PROJECT_ID"),
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const [result] = await listStatusHistory([1]);
+    expect(result.history).toHaveLength(1);
+    expect(result.history[0].to_status).toBe("a-faire");
+  });
+
+  it("batchise en chunks de 50", async () => {
+    const numbers = Array.from({ length: 60 }, (_, i) => i + 1);
+    const makeRepo = (nums: number[]) =>
+      Object.fromEntries(nums.map((n, i) => [
+        `i${i}`,
+        { number: n, timelineItems: { nodes: [] } },
+      ]));
+
+    mockFetch(
+      TOKEN_RESPONSE,
+      { data: { repository: makeRepo(numbers.slice(0, 50)) } },
+      { data: { repository: makeRepo(numbers.slice(50)) } },
+    );
+
+    const results = await listStatusHistory(numbers);
+    expect(results).toHaveLength(60);
+    // 3 appels : token + 2 batches
+    expect(fetchCalls()).toHaveLength(3);
   });
 });

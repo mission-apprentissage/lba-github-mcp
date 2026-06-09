@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listLabels, listMembers, listIssues, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listProjectItems, listStatusHistory, listLabels, listMembers, listIssues, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -136,6 +136,39 @@ function buildMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: `Issue #${issue.number} mise à jour.\n${issue.html_url}` }],
       };
+    }
+  );
+
+  server.registerTool(
+    "list_project_items",
+    {
+      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles : ${Object.keys(SPRINT_OPTIONS).join(" | ")}.`,
+      inputSchema: {
+        sprint: z.string().optional().describe(`Filtrer par sprint (ex. "Sprint 3"). Si absent, retourne tous les items.`),
+        limit: z.number().optional().default(200).describe("Nombre max d'items (défaut : 200)"),
+      },
+    },
+    async ({ sprint, limit }) => {
+      const items = await listProjectItems(sprint, limit);
+      if (!items.length) return { content: [{ type: "text" as const, text: "Aucun item trouvé." }] };
+      const json = JSON.stringify(items, null, 2);
+      return { content: [{ type: "text" as const, text: `${items.length} item(s)${sprint ? ` — ${sprint}` : ""} :\n\n\`\`\`json\n${json}\n\`\`\`` }] };
+    }
+  );
+
+  server.registerTool(
+    "list_status_history",
+    {
+      description: "Retourne l'historique des changements de statut pour une liste d'issues, avec la durée passée dans chaque statut (en secondes). À appeler après list_project_items pour calculer le temps médian par statut.",
+      inputSchema: {
+        issue_numbers: z.array(z.number().int().positive()).describe("Numéros des issues GitHub"),
+      },
+    },
+    async ({ issue_numbers }) => {
+      const history = await listStatusHistory(issue_numbers);
+      if (!history.length) return { content: [{ type: "text" as const, text: "Aucun historique trouvé." }] };
+      const json = JSON.stringify(history, null, 2);
+      return { content: [{ type: "text" as const, text: `Historique de ${history.length} issue(s) :\n\n\`\`\`json\n${json}\n\`\`\`` }] };
     }
   );
 
