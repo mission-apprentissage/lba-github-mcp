@@ -395,6 +395,7 @@ function makeProjectItem(issueNumber: number, overrides: {
         { field: { name: "Status" }, name: status },
         { field: { name: "Team" }, name: team },
         { field: { name: "Sprint" }, title: sprint },
+        { field: { name: "Priority" }, name: priority },
       ],
     },
     content: {
@@ -405,9 +406,6 @@ function makeProjectItem(issueNumber: number, overrides: {
       body: "Description",
       state,
       issueType: { name: type },
-      fieldValues: {
-        nodes: [{ field: { name: "Priority" }, name: priority }],
-      },
     },
   };
 }
