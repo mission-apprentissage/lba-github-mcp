@@ -292,8 +292,8 @@ export interface IssueContext {
 export async function getIssueContext(issueNumber: number): Promise<IssueContext> {
   type Result = { repository: { issue: { id: string; projectItems: { nodes: { id: string; project: { id: string } }[] } } } };
   const data = await graphqlRequest<Result>(
-    `query($owner:String!,$repo:String!,$num:Int!,$pid:ID!){repository(owner:$owner,name:$repo){issue(number:$num){id projectItems(first:10){nodes{id project{id}}}}}}`,
-    { owner: ORG, repo: REPO, num: issueNumber, pid: PROJECT_ID }
+    `query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){id projectItems(first:10){nodes{id project{id}}}}}}`,
+    { owner: ORG, repo: REPO, num: issueNumber }
   );
   const issue = data.repository.issue;
   const item = issue.projectItems.nodes.find((n) => n.project.id === PROJECT_ID) ?? null;
