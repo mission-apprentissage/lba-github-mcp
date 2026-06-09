@@ -446,7 +446,7 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
                 ... on Issue{
                   id number title url body state
                   issueType{name}
-                  fieldValues(first:5){
+                  issueFieldValues(first:5){
                     nodes{
                       ... on IssueFieldSingleSelectValue{
                         field{... on IssueFieldSingleSelect{id name}}
@@ -475,7 +475,7 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
     content: {
       id: string; number: number; title: string; url: string; body: string; state: string;
       issueType?: { name: string };
-      fieldValues: { nodes: { field?: { id: string; name: string }; name?: string }[] };
+      issueFieldValues: { nodes: { field?: { id: string; name: string }; name?: string }[] };
     } | null;
   };
   type Result = { node: { items: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: RawItem[] } } };
@@ -511,7 +511,7 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
         sprintEndDate = start.toISOString().slice(0, 10);
       }
 
-      const issuePriority = node.content.fieldValues.nodes
+      const issuePriority = node.content.issueFieldValues.nodes
         .find((fv) => fv.field?.id === PRIORITY_FIELD_ID)?.name ?? null;
 
       items.push({

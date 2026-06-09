@@ -408,7 +408,7 @@ function makeProjectItem(issueNumber: number, overrides: {
       body: "Description",
       state,
       issueType: { name: type },
-      fieldValues: {
+      issueFieldValues: {
         nodes: priority ? [{ field: { id: PRIORITY_FIELD_ID, name: "Priority" }, name: priority }] : [],
       },
     },
