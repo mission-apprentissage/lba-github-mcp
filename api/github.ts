@@ -13,7 +13,7 @@ export const SELECT_FIELD_IDS = {
   approver: "PVTSSF_lADOA8sl_s4BW3LizhSmLWU",
 } as const;
 
-const PRIORITY_FIELD_ID = "IFSS_kgDOAPO9Ww";
+export const PRIORITY_FIELD_ID = "IFSS_kgDOAPO9Ww";
 
 export const SPRINT_FIELD_ID = "PVTIF_lADOA8sl_s4BW3LizhSfYwQ";
 
@@ -441,6 +441,14 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
                 ... on Issue{
                   id number title url body state
                   issueType{name}
+                  fieldValues(first:5){
+                    nodes{
+                      ... on IssueFieldSingleSelectValue{
+                        field{... on IssueFieldSingleSelect{id name}}
+                        name
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -455,6 +463,7 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
     content: {
       id: string; number: number; title: string; url: string; body: string; state: string;
       issueType?: { name: string };
+      fieldValues: { nodes: { field?: { id: string; name: string }; name?: string }[] };
     } | null;
   };
   type Result = { node: { items: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: RawItem[] } } };
@@ -479,7 +488,8 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
       const sprintValue = projectFields["Sprint"] ?? null;
       if (sprint && sprintValue !== sprint) continue;
 
-      const issuePriority = projectFields["Priority"] ?? null;
+      const issuePriority = node.content.fieldValues.nodes
+        .find((fv) => fv.field?.id === PRIORITY_FIELD_ID)?.name ?? null;
 
       items.push({
         item_id:      node.id,

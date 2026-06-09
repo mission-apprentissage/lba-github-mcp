@@ -22,6 +22,7 @@ import {
   PROJECT_ID,
   SELECT_FIELD_IDS,
   SPRINT_FIELD_ID,
+  PRIORITY_FIELD_ID,
 } from "./github";
 
 // ─── setup global ────────────────────────────────────────────────────────────
@@ -395,7 +396,6 @@ function makeProjectItem(issueNumber: number, overrides: {
         { field: { name: "Status" }, name: status },
         { field: { name: "Team" }, name: team },
         { field: { name: "Sprint" }, title: sprint },
-        { field: { name: "Priority" }, name: priority },
       ],
     },
     content: {
@@ -406,6 +406,9 @@ function makeProjectItem(issueNumber: number, overrides: {
       body: "Description",
       state,
       issueType: { name: type },
+      fieldValues: {
+        nodes: priority ? [{ field: { id: PRIORITY_FIELD_ID, name: "Priority" }, name: priority }] : [],
+      },
     },
   };
 }
