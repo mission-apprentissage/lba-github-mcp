@@ -6,6 +6,9 @@ import {
   setSelectField,
   setPriorityField,
   setSprintField,
+  listSprints,
+  getCurrentSprint,
+  _resetSprintCache,
   setIssueType,
   getIssueContext,
   updateIssue,
@@ -17,7 +20,6 @@ import {
   _resetTokenCache,
   SELECT_OPTIONS,
   PRIORITY_OPTIONS,
-  SPRINT_OPTIONS,
   TYPE_OPTIONS,
   PROJECT_ID,
   SELECT_FIELD_IDS,
@@ -40,6 +42,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.restoreAllMocks();
   _resetTokenCache();
+  _resetSprintCache();
 });
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -164,22 +167,82 @@ describe("setPriorityField", () => {
   });
 });
 
-// ─── setSprintField ──────────────────────────────────────────────────────────
+// ─── listSprints / getCurrentSprint / setSprintField ─────────────────────────
+
+/** Réponse GraphQL de la config du champ Sprint. */
+function sprintConfig(iterations: object[], completedIterations: object[] = []) {
+  return { data: { node: { field: { configuration: { iterations, completedIterations } } } } };
+}
+
+const SPRINTS_PAYLOAD = sprintConfig(
+  [
+    { id: "iter_cur", title: "Sprint 4", startDate: "2026-06-22", duration: 14 },
+    { id: "iter_next", title: "Sprint 5", startDate: "2026-07-06", duration: 14 },
+  ],
+  [{ id: "iter_old", title: "Sprint 3", startDate: "2026-06-08", duration: 14 }]
+);
+
+describe("listSprints", () => {
+  it("expose les itérations terminées puis en cours avec dates calculées", async () => {
+    mockFetch(...withToken(SPRINTS_PAYLOAD));
+
+    const sprints = await listSprints();
+
+    expect(sprints.map((s) => s.title)).toEqual(["Sprint 3", "Sprint 4", "Sprint 5"]);
+    expect(sprints[0]).toMatchObject({ id: "iter_old", completed: true, start_date: "2026-06-08", end_date: "2026-06-22", duration_days: 14 });
+    expect(sprints[1]).toMatchObject({ completed: false, end_date: "2026-07-06" });
+  });
+
+  it("met en cache (un seul fetch réseau pour deux appels)", async () => {
+    mockFetch(...withToken(SPRINTS_PAYLOAD));
+
+    await listSprints();
+    await listSprints();
+
+    // token + 1 query config = 2 appels (pas de second fetch config)
+    expect(fetchCalls().length).toBe(2);
+  });
+});
+
+describe("getCurrentSprint", () => {
+  it("retourne le sprint encadrant la date du jour", async () => {
+    // 2026-06-25 est dans Sprint 4 (22/06 → 06/07)
+    vi.setSystemTime(new Date("2026-06-25T12:00:00Z"));
+    mockFetch(...withToken(SPRINTS_PAYLOAD));
+
+    const current = await getCurrentSprint();
+
+    expect(current?.title).toBe("Sprint 4");
+    vi.useRealTimers();
+  });
+});
 
 describe("setSprintField", () => {
-  it("appelle updateProjectV2ItemFieldValue avec le bon iterationId", async () => {
-    mockFetch(...withToken({ data: {} }));
+  it("résout le titre via listSprints et appelle la mutation avec l'iterationId", async () => {
+    mockFetch(TOKEN_RESPONSE, SPRINTS_PAYLOAD, { data: {} });
 
-    await setSprintField("ITEM_1", "Sprint 1");
+    await setSprintField("ITEM_1", "Sprint 4");
 
-    const [, opts] = fetchCalls()[1];
+    // [0]=token, [1]=config listSprints, [2]=mutation
+    const [, opts] = fetchCalls()[2];
     const body = JSON.parse(opts.body);
     expect(body.variables.fid).toBe(SPRINT_FIELD_ID);
-    expect(body.variables.iter).toBe(SPRINT_OPTIONS["Sprint 1"]);
+    expect(body.variables.iter).toBe("iter_cur");
+  });
+
+  it('résout "current" vers le sprint en cours', async () => {
+    vi.setSystemTime(new Date("2026-06-25T12:00:00Z"));
+    mockFetch(TOKEN_RESPONSE, SPRINTS_PAYLOAD, { data: {} });
+
+    await setSprintField("ITEM_1", "current");
+
+    const [, opts] = fetchCalls()[2];
+    expect(JSON.parse(opts.body).variables.iter).toBe("iter_cur");
+    vi.useRealTimers();
   });
 
   it("lève une erreur pour un sprint inconnu", async () => {
-    mockFetch(...withToken({}));
+    mockFetch(...withToken(SPRINTS_PAYLOAD));
     await expect(setSprintField("ITEM_1", "Sprint 99")).rejects.toThrow('Sprint "Sprint 99" inconnu');
   });
 });
