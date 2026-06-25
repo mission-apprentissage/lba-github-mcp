@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listProjectItems, listStatusHistory, listLabels, listMembers, listIssues, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, SPRINT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listProjectItems, listStatusHistory, listLabels, listMembers, listIssues, listSprints, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -75,7 +75,7 @@ function buildMcpServer(): McpServer {
 - team : ${Object.keys(SELECT_OPTIONS.team).join(" | ")} → project item ID
 - epic : (liste complète via list_epics) → project item ID
 - approver : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")} → project item ID
-- sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")} → project item ID
+- sprint : titre exact d'une itération (voir list_sprints), ou "current" pour le sprint en cours → project item ID
 - priority : ${Object.keys(PRIORITY_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)
 - type : ${Object.keys(TYPE_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)`,
       inputSchema: {
@@ -114,7 +114,7 @@ function buildMcpServer(): McpServer {
         team: z.string().optional().describe(`Équipe : ${Object.keys(SELECT_OPTIONS.team).join(" | ")}`),
         epic: z.string().optional().describe("Epic (valeurs via list_epics)"),
         approver: z.string().optional().describe(`Approbateur : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")}`),
-        sprint: z.string().optional().describe(`Sprint : ${Object.keys(SPRINT_OPTIONS).join(" | ")}`),
+        sprint: z.string().optional().describe(`Sprint : titre exact d'une itération (voir list_sprints), ou "current" pour le sprint en cours`),
         priority: z.string().optional().describe(`Priorité : ${Object.keys(PRIORITY_OPTIONS).join(" | ")}`),
         type: z.string().optional().describe(`Type : ${Object.keys(TYPE_OPTIONS).join(" | ")}`),
       },
@@ -142,9 +142,9 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "list_project_items",
     {
-      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint, sprint_start_date, sprint_end_date, sprint_duration_days) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles : ${Object.keys(SPRINT_OPTIONS).join(" | ")}.`,
+      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint, sprint_start_date, sprint_end_date, sprint_duration_days) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles via list_sprints.`,
       inputSchema: {
-        sprint: z.string().optional().describe(`Filtrer par sprint (ex. "Sprint 3"). Si absent, retourne tous les items.`),
+        sprint: z.string().optional().describe(`Filtrer par sprint (titre exact, voir list_sprints). Si absent, retourne tous les items.`),
         limit: z.number().optional().default(200).describe("Nombre max d'items (défaut : 200)"),
       },
     },
@@ -178,6 +178,17 @@ function buildMcpServer(): McpServer {
     async () => {
       const lines = Object.keys(SELECT_OPTIONS.epic).map((e) => `- ${e}`).join("\n");
       return { content: [{ type: "text" as const, text: `Epics :\n\n${lines}` }] };
+    }
+  );
+
+  server.registerTool(
+    "list_sprints",
+    { description: "Liste les sprints (itérations) configurés sur le champ Sprint du GitHub Project LBA, avec dates de début/fin, durée et statut (terminé ou non). Les valeurs de titre sont celles à passer aux champs sprint de create_issue/set_project_field/update_issue." },
+    async () => {
+      const sprints = await listSprints(true);
+      if (!sprints.length) return { content: [{ type: "text" as const, text: "Aucun sprint configuré." }] };
+      const json = JSON.stringify(sprints, null, 2);
+      return { content: [{ type: "text" as const, text: `${sprints.length} sprint(s) :\n\n\`\`\`json\n${json}\n\`\`\`` }] };
     }
   );
 

@@ -112,13 +112,6 @@ export const TYPE_OPTIONS: Record<string, string> = {
   "Task":    "IT_kwDOA8sl_s4AuQVe",
 };
 
-export const SPRINT_OPTIONS: Record<string, string> = {
-  "Sprint 1": "ee0256b9",
-  "Sprint 2": "8969e93e",
-  "Sprint 3": "0b4a1c04",
-  "Sprint 4": "96cd93e7",
-};
-
 export interface GitHubIssue {
   number: number;
   title: string;
@@ -361,15 +354,80 @@ export async function updateIssue(params: UpdateIssueFields): Promise<GitHubIssu
   return restRequest<GitHubIssue>(`/repos/${ORG}/${REPO}/issues/${issueNumber}`, "GET");
 }
 
+export interface SprintIteration {
+  id: string;
+  title: string;
+  start_date: string;
+  duration_days: number;
+  end_date: string;
+  completed: boolean;
+}
+
+let cachedSprints: { data: SprintIteration[]; expiresAt: number } | null = null;
+
+/** Test-only: invalidates the sprint cache so the next call re-fetches. */
+export function _resetSprintCache() { cachedSprints = null; }
+
+function endDate(startDate: string, duration: number): string {
+  const d = new Date(startDate + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + duration);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Récupère dynamiquement les itérations (sprints) configurées sur le champ
+ * "Sprint" du Project. Les sprints terminés précèdent les sprints à venir.
+ * Cache 5 min pour éviter une requête à chaque appel.
+ */
+export async function listSprints(force = false): Promise<SprintIteration[]> {
+  if (!force && cachedSprints && Date.now() < cachedSprints.expiresAt) {
+    return cachedSprints.data;
+  }
+  type RawIter = { id: string; title: string; startDate: string; duration: number };
+  type Result = {
+    node: { field: { configuration: { iterations: RawIter[]; completedIterations: RawIter[] } } };
+  };
+  const data = await graphqlRequest<Result>(
+    `query($pid:ID!){node(id:$pid){... on ProjectV2{field(name:"Sprint"){... on ProjectV2IterationField{id configuration{iterations{id title startDate duration}completedIterations{id title startDate duration}}}}}}}`,
+    { pid: PROJECT_ID }
+  );
+  const cfg = data.node.field.configuration;
+  const map = (i: RawIter, completed: boolean): SprintIteration => ({
+    id: i.id,
+    title: i.title,
+    start_date: i.startDate,
+    duration_days: i.duration,
+    end_date: endDate(i.startDate, i.duration),
+    completed,
+  });
+  const sprints = [
+    ...cfg.completedIterations.map((i) => map(i, true)),
+    ...cfg.iterations.map((i) => map(i, false)),
+  ];
+  cachedSprints = { data: sprints, expiresAt: Date.now() + 5 * 60_000 };
+  return sprints;
+}
+
+/** Sprint courant (startDate <= aujourd'hui < endDate), ou null si aucun. */
+export async function getCurrentSprint(): Promise<SprintIteration | null> {
+  const today = new Date().toISOString().slice(0, 10);
+  const sprints = await listSprints();
+  return sprints.find((s) => s.start_date <= today && today < s.end_date) ?? null;
+}
+
 export async function setSprintField(itemId: string, sprint: string): Promise<void> {
-  const iterationId = SPRINT_OPTIONS[sprint];
-  if (!iterationId) {
-    const valid = Object.keys(SPRINT_OPTIONS).join(", ");
-    throw new Error(`Sprint "${sprint}" inconnu. Valeurs valides : ${valid}`);
+  const sprints = await listSprints();
+  // "current" / "courant" résout vers le sprint en cours.
+  const match = (sprint === "current" || sprint === "courant")
+    ? await getCurrentSprint()
+    : sprints.find((s) => s.title === sprint);
+  if (!match) {
+    const valid = sprints.map((s) => s.title).join(", ");
+    throw new Error(`Sprint "${sprint}" inconnu. Valeurs valides : ${valid || "(aucun sprint configuré)"}`);
   }
   await graphqlRequest(
     `mutation($pid:ID!,$iid:ID!,$fid:ID!,$iter:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$iid,fieldId:$fid,value:{iterationId:$iter}}){projectV2Item{id}}}`,
-    { pid: PROJECT_ID, iid: itemId, fid: SPRINT_FIELD_ID, iter: iterationId }
+    { pid: PROJECT_ID, iid: itemId, fid: SPRINT_FIELD_ID, iter: match.id }
   );
 }
 
