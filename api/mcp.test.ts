@@ -1,8 +1,9 @@
 import { generateKeyPairSync } from "crypto";
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import type { VercelRequest } from "@vercel/node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { buildMcpServer } from "./mcp";
+import { buildMcpServer, isAuthorized } from "./mcp";
 import { _resetTokenCache, _resetSprintCache, _resetFieldOptionsCache } from "./github";
 
 // Vérifie par exécution (protocole MCP réel via transport in-memory, pas juste
@@ -130,5 +131,49 @@ describe("create_issue via le protocole MCP", () => {
     expect(text).toContain("**#42**");
     expect(text).toContain("⚠️ Bloquant(s) non rattaché(s)");
     expect(text).toContain("rattachement échoué");
+  });
+});
+
+describe("isAuthorized", () => {
+  afterEach(() => {
+    delete process.env.MCP_SECRET;
+  });
+
+  function fakeRequest(opts: { token?: string; authorization?: string }): VercelRequest {
+    return {
+      query: opts.token !== undefined ? { token: opts.token } : {},
+      headers: opts.authorization !== undefined ? { authorization: opts.authorization } : {},
+    } as unknown as VercelRequest;
+  }
+
+  it("autorise tout si MCP_SECRET n'est pas configuré", () => {
+    delete process.env.MCP_SECRET;
+    expect(isAuthorized(fakeRequest({}))).toBe(true);
+  });
+
+  it("autorise via le query param ?token=", () => {
+    process.env.MCP_SECRET = "s3cr3t";
+    expect(isAuthorized(fakeRequest({ token: "s3cr3t" }))).toBe(true);
+  });
+
+  it("autorise via un header Authorization: Bearer <token>", () => {
+    process.env.MCP_SECRET = "s3cr3t";
+    expect(isAuthorized(fakeRequest({ authorization: "Bearer s3cr3t" }))).toBe(true);
+  });
+
+  it("autorise via un header Authorization: Basic <token> (Le Chat n'envoie pas de base64)", () => {
+    process.env.MCP_SECRET = "s3cr3t";
+    expect(isAuthorized(fakeRequest({ authorization: "Basic s3cr3t" }))).toBe(true);
+  });
+
+  it("refuse un token incorrect, que ce soit en query ou en header", () => {
+    process.env.MCP_SECRET = "s3cr3t";
+    expect(isAuthorized(fakeRequest({ token: "wrong" }))).toBe(false);
+    expect(isAuthorized(fakeRequest({ authorization: "Bearer wrong" }))).toBe(false);
+  });
+
+  it("refuse quand ni query ni header ne sont fournis", () => {
+    process.env.MCP_SECRET = "s3cr3t";
+    expect(isAuthorized(fakeRequest({}))).toBe(false);
   });
 });

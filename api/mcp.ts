@@ -264,7 +264,28 @@ export function buildMcpServer(): McpServer {
 function setCorsHeaders(res: VercelResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, mcp-session-id");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
+}
+
+/**
+ * Accepte le secret soit en query param (?token=), soit dans le header
+ * Authorization — quel que soit le schéma (Bearer/Basic) — pour les clients
+ * MCP (ex. Le Chat) qui n'exposent qu'un champ "token" saisi via un header
+ * Authorization plutôt qu'une query string.
+ */
+export function isAuthorized(req: VercelRequest): boolean {
+  const secret = process.env.MCP_SECRET;
+  if (!secret) return true;
+
+  if (req.query["token"] === secret) return true;
+
+  const authHeader = req.headers["authorization"];
+  if (typeof authHeader === "string") {
+    const match = authHeader.match(/^\S+\s+(.+)$/);
+    if (match && match[1] === secret) return true;
+  }
+
+  return false;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -275,8 +296,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const secret = process.env.MCP_SECRET;
-  if (secret && req.query["token"] !== secret) {
+  if (!isAuthorized(req)) {
     res.status(401).json({ error: "Non autorisé" });
     return;
   }
