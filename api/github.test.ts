@@ -199,6 +199,16 @@ describe("listEpics / listApprovers", () => {
     const body = JSON.parse(fetchCalls()[1][1].body);
     expect(body.variables.fid).toBe(SELECT_FIELD_IDS.approver);
   });
+
+  it("lève une erreur exploitable si le field ID est invalide ou supprimé (node null)", async () => {
+    mockFetch(TOKEN_RESPONSE, { data: { node: null } });
+    await expect(listEpics()).rejects.toThrow(/epic.*introuvable|introuvable.*epic/i);
+  });
+
+  it("lève une erreur exploitable si le node n'est pas un single-select (pas de champ options)", async () => {
+    mockFetch(TOKEN_RESPONSE, { data: { node: {} } });
+    await expect(listApprovers()).rejects.toThrow(/approver/i);
+  });
 });
 
 // ─── setPriorityField ────────────────────────────────────────────────────────
@@ -325,6 +335,19 @@ describe("resolveIssueNodeIds", () => {
     const body = JSON.parse(opts.body);
     expect(body.query).toContain("i0: issue(number: 10)");
     expect(body.query).toContain("i1: issue(number: 20)");
+  });
+
+  it("mappe les numéros résolus et ignore un numéro introuvable, sans lever (near-miss: numéro d'issue inexistant)", async () => {
+    // Forme de réponse réellement observée sur l'API GitHub : `data` contient les
+    // alias résolus (parent valide) ET un alias null pour le numéro inexistant, en
+    // même temps qu'un `errors` top-level NOT_FOUND pour cet alias.
+    mockFetch(TOKEN_RESPONSE, {
+      data: { repository: { i0: { id: "NI_valid" }, i1: null } },
+      errors: [{ type: "NOT_FOUND", path: ["repository", "i1"], message: "Could not resolve to an Issue with the number of 999999999." }],
+    });
+
+    const result = await resolveIssueNodeIds([10, 999999999]);
+    expect(result).toEqual({ 10: "NI_valid" });
   });
 });
 

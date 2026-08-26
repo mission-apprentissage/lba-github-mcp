@@ -59,11 +59,14 @@ export async function getDynamicFieldOptions(field: DynamicSelectField): Promise
   const cached = cachedFieldOptions[field];
   if (cached && Date.now() < cached.expiresAt) return cached.data;
 
-  type Result = { node: { options: { id: string; name: string }[] } };
+  type Result = { node: { options?: { id: string; name: string }[] } | null };
   const data = await graphqlRequest<Result>(
     `query($fid:ID!){node(id:$fid){... on ProjectV2SingleSelectField{options{id name}}}}`,
     { fid: SELECT_FIELD_IDS[field] }
   );
+  if (!data.node?.options) {
+    throw new Error(`Champ "${field}" (${SELECT_FIELD_IDS[field]}) introuvable ou n'est pas un champ single-select du Project`);
+  }
   const options: Record<string, string> = {};
   for (const o of data.node.options) options[o.name] = o.id;
   cachedFieldOptions[field] = { data: options, expiresAt: Date.now() + 5 * 60_000 };
@@ -161,7 +164,15 @@ async function restRequest<T>(path: string, method = "GET", body?: unknown): Pro
   return res.json() as Promise<T>;
 }
 
-async function graphqlRequest<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+/**
+ * `tolerateErrors` : ne lève pas si `errors` est présent tant que `data` l'est aussi.
+ * GitHub renvoie les deux simultanément dès qu'un alias échoue dans une requête à
+ * alias multiples (ex. `issue(number: N)` sur un numéro inexistant) — utile aux
+ * appelants qui traitent déjà les valeurs nulles par alias (ex. resolveIssueNodeIds).
+ * Les mutations gardent le comportement strict par défaut : un `errors` y signale
+ * un échec réel qui ne doit pas être avalé.
+ */
+async function graphqlRequest<T>(query: string, variables: Record<string, unknown>, opts?: { tolerateErrors?: boolean }): Promise<T> {
   const token = await getToken();
   const res = await fetch(`${BASE}/graphql`, {
     method: "POST",
@@ -175,7 +186,8 @@ async function graphqlRequest<T>(query: string, variables: Record<string, unknow
   });
   if (!res.ok) throw new Error(`GraphQL ${res.status}: ${await res.text()}`);
   const data = (await res.json()) as { data?: T; errors?: unknown[] };
-  if (data.errors) throw new Error(`GraphQL: ${JSON.stringify(data.errors)}`);
+  const canTolerate = opts?.tolerateErrors && data.data !== undefined;
+  if (data.errors && !canTolerate) throw new Error(`GraphQL: ${JSON.stringify(data.errors)}`);
   return data.data as T;
 }
 
@@ -410,8 +422,8 @@ export async function resolveIssueNodeIds(issueNumbers: number[]): Promise<Recor
   if (!issueNumbers.length) return {};
   const aliases = issueNumbers.map((n, i) => `i${i}: issue(number: ${n}) { id }`).join("\n    ");
   const query = `query { repository(owner: "${ORG}", name: "${REPO}") {\n    ${aliases}\n  } }`;
-  type RepoResult = { repository: Record<string, { id: string }> };
-  const data = await graphqlRequest<RepoResult>(query, {});
+  type RepoResult = { repository: Record<string, { id: string } | null> };
+  const data = await graphqlRequest<RepoResult>(query, {}, { tolerateErrors: true });
   const result: Record<number, string> = {};
   issueNumbers.forEach((n, i) => {
     const node = data.repository[`i${i}`];
