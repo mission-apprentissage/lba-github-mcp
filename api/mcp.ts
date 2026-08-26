@@ -7,7 +7,7 @@ import { createIssue, addIssueToProject, setSelectField, setSprintField, setPrio
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
-function buildMcpServer(): McpServer {
+export function buildMcpServer(): McpServer {
   const server = new McpServer({ name: "lba-github-mcp", version: "1.0.0" });
 
   server.registerTool(
