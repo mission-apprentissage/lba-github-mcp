@@ -17,7 +17,11 @@ import {
   resolveIssueNodeIds,
   addSubIssue,
   addBlockedByRelationship,
+  listIssues,
+  listEpics,
+  listApprovers,
   _resetTokenCache,
+  _resetFieldOptionsCache,
   SELECT_OPTIONS,
   PRIORITY_OPTIONS,
   TYPE_OPTIONS,
@@ -43,6 +47,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   _resetTokenCache();
   _resetSprintCache();
+  _resetFieldOptionsCache();
 });
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -143,6 +148,56 @@ describe("setSelectField", () => {
   it("lève une erreur pour une valeur inconnue", async () => {
     mockFetch(...withToken({}));
     await expect(setSelectField("ITEM_1", "status", "inexistant")).rejects.toThrow('Valeur "inexistant" inconnue');
+  });
+
+  it("résout epic dynamiquement via getDynamicFieldOptions plutôt qu'une table codée en dur", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      { data: { node: { options: [{ id: "epic_opt_1", name: "API" }] } } }, // getDynamicFieldOptions
+      { data: {} }, // mutation
+    );
+
+    await setSelectField("ITEM_1", "epic", "API");
+
+    const optionsCall = JSON.parse(fetchCalls()[1][1].body);
+    expect(optionsCall.query).toContain("ProjectV2SingleSelectField");
+    expect(optionsCall.variables.fid).toBe(SELECT_FIELD_IDS.epic);
+    const mutationCall = JSON.parse(fetchCalls()[2][1].body);
+    expect(mutationCall.variables.oid).toBe("epic_opt_1");
+  });
+
+  it("lève une erreur pour une epic qui n'existe pas dans le Project (near-miss orthographe)", async () => {
+    mockFetch(TOKEN_RESPONSE, { data: { node: { options: [{ id: "epic_opt_1", name: "API" }] } } });
+    await expect(setSelectField("ITEM_1", "epic", "APi")).rejects.toThrow('Valeur "APi" inconnue');
+  });
+});
+
+// ─── listEpics / listApprovers (champs dynamiques) ──────────────────────────
+
+describe("listEpics / listApprovers", () => {
+  it("récupère les options epic depuis le Project (pas de table codée en dur)", async () => {
+    mockFetch(TOKEN_RESPONSE, { data: { node: { options: [{ id: "e1", name: "API" }, { id: "e2", name: "BAL" }] } } });
+
+    const epics = await listEpics();
+    expect(epics).toEqual({ API: "e1", BAL: "e2" });
+  });
+
+  it("met en cache (un seul fetch réseau pour deux appels)", async () => {
+    mockFetch(TOKEN_RESPONSE, { data: { node: { options: [{ id: "e1", name: "API" }] } } });
+
+    await listEpics();
+    await listEpics();
+
+    expect(fetchCalls().length).toBe(2); // token + 1 query (pas de second fetch)
+  });
+
+  it("approver interroge le field ID approver, distinct de epic", async () => {
+    mockFetch(TOKEN_RESPONSE, { data: { node: { options: [{ id: "a1", name: "Kevin" }] } } });
+
+    await listApprovers();
+
+    const body = JSON.parse(fetchCalls()[1][1].body);
+    expect(body.variables.fid).toBe(SELECT_FIELD_IDS.approver);
   });
 });
 
@@ -651,5 +706,36 @@ describe("listStatusHistory", () => {
     expect(results).toHaveLength(60);
     // 3 appels : token + 2 batches
     expect(fetchCalls()).toHaveLength(3);
+  });
+});
+
+// ─── listIssues ────────────────────────────────────────────────────────────
+
+describe("listIssues", () => {
+  it("filtre par défaut sur state=open", async () => {
+    mockFetch(...withToken([]));
+
+    await listIssues({ limit: 20 });
+
+    const [url] = fetchCalls()[1];
+    expect(url).toContain("state=open");
+  });
+
+  it("passe state=closed quand demandé", async () => {
+    mockFetch(...withToken([]));
+
+    await listIssues({ limit: 20, state: "closed" });
+
+    const [url] = fetchCalls()[1];
+    expect(url).toContain("state=closed");
+  });
+
+  it("passe state=all quand demandé", async () => {
+    mockFetch(...withToken([]));
+
+    await listIssues({ limit: 20, state: "all" });
+
+    const [url] = fetchCalls()[1];
+    expect(url).toContain("state=all");
   });
 });
