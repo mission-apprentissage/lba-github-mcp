@@ -3,11 +3,11 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listProjectItems, listStatusHistory, listLabels, listMembers, listIssues, listSprints, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
+import { createIssue, addIssueToProject, setSelectField, setSprintField, setPriorityField, setIssueType, updateIssue, listProjectItems, listStatusHistory, listLabels, listMembers, listIssues, listSprints, listEpics, listApprovers, resolveIssueNodeIds, addSubIssue, addBlockedByRelationship, SELECT_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS } from "./github";
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
-function buildMcpServer(): McpServer {
+export function buildMcpServer(): McpServer {
   const server = new McpServer({ name: "lba-github-mcp", version: "1.0.0" });
 
   server.registerTool(
@@ -18,12 +18,13 @@ function buildMcpServer(): McpServer {
         title: z.string().describe("Titre de l'issue"),
         description: z.string().optional().describe("Corps de l'issue en markdown"),
         assignees: z.array(z.string()).optional().describe("Logins GitHub des assignés"),
+        labels: z.array(z.string()).optional().describe("Labels à appliquer (voir list_labels pour les valeurs disponibles)"),
         parent_issue_number: z.number().optional().describe("Numéro de l'issue parente (rattache l'issue créée comme sub-issue)"),
         blocked_by: z.array(z.number()).optional().describe("Numéros des issues qui bloquent l'issue créée"),
       },
     },
-    async ({ title, description, assignees, parent_issue_number, blocked_by }) => {
-      const issue = await createIssue({ title, body: description, assignees });
+    async ({ title, description, assignees, labels, parent_issue_number, blocked_by }) => {
+      const issue = await createIssue({ title, body: description, assignees, labels });
       const itemId = await addIssueToProject(issue.node_id);
 
       // Résolution des node IDs en une seule query
@@ -34,20 +35,26 @@ function buildMcpServer(): McpServer {
       const nodeIds = numbersToResolve.length ? await resolveIssueNodeIds(numbersToResolve) : {};
 
       let parentIssueUrl: string | undefined;
+      let parentWarning: string | undefined;
       if (parent_issue_number) {
         const parentNodeId = nodeIds[parent_issue_number];
         if (parentNodeId) {
           await addSubIssue(parentNodeId, issue.node_id);
           parentIssueUrl = `https://github.com/mission-apprentissage/labonnealternance/issues/${parent_issue_number}`;
+        } else {
+          parentWarning = `#${parent_issue_number} introuvable — rattachement au parent NON effectué`;
         }
       }
 
       const linkedBlockers: number[] = [];
+      const unresolvedBlockers: number[] = [];
       for (const blockerNum of blocked_by ?? []) {
         const blockerNodeId = nodeIds[blockerNum];
         if (blockerNodeId) {
           await addBlockedByRelationship(issue.node_id, blockerNodeId);
           linkedBlockers.push(blockerNum);
+        } else {
+          unresolvedBlockers.push(blockerNum);
         }
       }
 
@@ -61,7 +68,9 @@ function buildMcpServer(): McpServer {
         `Issue node ID : \`${issue.node_id}\` _(priority)_`,
       ];
       if (parentIssueUrl) lines.push(`Parent : ${parentIssueUrl}`);
+      if (parentWarning) lines.push(`⚠️ Parent non rattaché : ${parentWarning}`);
       if (linkedBlockers.length) lines.push(`Blocked by : ${linkedBlockers.map((n) => `#${n}`).join(", ")}`);
+      if (unresolvedBlockers.length) lines.push(`⚠️ Bloquant(s) introuvable(s), non rattaché(s) : ${unresolvedBlockers.map((n) => `#${n}`).join(", ")}`);
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
@@ -74,7 +83,7 @@ function buildMcpServer(): McpServer {
 - status : ${Object.keys(SELECT_OPTIONS.status).join(" | ")} → project item ID
 - team : ${Object.keys(SELECT_OPTIONS.team).join(" | ")} → project item ID
 - epic : (liste complète via list_epics) → project item ID
-- approver : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")} → project item ID
+- approver : (liste complète via list_approvers) → project item ID
 - sprint : titre exact d'une itération (voir list_sprints), ou "current" pour le sprint en cours → project item ID
 - priority : ${Object.keys(PRIORITY_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)
 - type : ${Object.keys(TYPE_OPTIONS).join(" | ")} → issue node ID (différent du project item ID)`,
@@ -113,7 +122,7 @@ function buildMcpServer(): McpServer {
         status: z.string().optional().describe(`Statut dans le Project : ${Object.keys(SELECT_OPTIONS.status).join(" | ")}`),
         team: z.string().optional().describe(`Équipe : ${Object.keys(SELECT_OPTIONS.team).join(" | ")}`),
         epic: z.string().optional().describe("Epic (valeurs via list_epics)"),
-        approver: z.string().optional().describe(`Approbateur : ${Object.keys(SELECT_OPTIONS.approver).join(" | ")}`),
+        approver: z.string().optional().describe("Approbateur (valeurs via list_approvers)"),
         sprint: z.string().optional().describe(`Sprint : titre exact d'une itération (voir list_sprints), ou "current" pour le sprint en cours`),
         priority: z.string().optional().describe(`Priorité : ${Object.keys(PRIORITY_OPTIONS).join(" | ")}`),
         type: z.string().optional().describe(`Type : ${Object.keys(TYPE_OPTIONS).join(" | ")}`),
@@ -176,8 +185,19 @@ function buildMcpServer(): McpServer {
     "list_epics",
     { description: "Liste toutes les epics disponibles dans le GitHub Project LBA." },
     async () => {
-      const lines = Object.keys(SELECT_OPTIONS.epic).map((e) => `- ${e}`).join("\n");
+      const epics = await listEpics();
+      const lines = Object.keys(epics).map((e) => `- ${e}`).join("\n");
       return { content: [{ type: "text" as const, text: `Epics :\n\n${lines}` }] };
+    }
+  );
+
+  server.registerTool(
+    "list_approvers",
+    { description: "Liste tous les approbateurs disponibles dans le GitHub Project LBA." },
+    async () => {
+      const approvers = await listApprovers();
+      const lines = Object.keys(approvers).map((a) => `- ${a}`).join("\n");
+      return { content: [{ type: "text" as const, text: `Approbateurs :\n\n${lines}` }] };
     }
   );
 
@@ -214,15 +234,16 @@ function buildMcpServer(): McpServer {
   server.registerTool(
     "list_issues",
     {
-      description: "Liste les issues ouvertes sur labonnealternance.",
+      description: "Liste les issues sur labonnealternance (ouvertes par défaut).",
       inputSchema: {
         labels: z.string().optional().describe("Filtrer par label(s), séparés par virgule"),
         assignee: z.string().optional().describe("Filtrer par assignee (login GitHub)"),
+        state: z.enum(["open", "closed", "all"]).optional().default("open").describe("État des issues à retourner (défaut : open)"),
         limit: z.number().optional().default(20).describe("Nombre max d'issues (défaut : 20)"),
       },
     },
-    async ({ labels, assignee, limit }) => {
-      const issues = await listIssues({ labels, assignee, limit });
+    async ({ labels, assignee, state, limit }) => {
+      const issues = await listIssues({ labels, assignee, state, limit });
       if (!issues.length) return { content: [{ type: "text" as const, text: "Aucune issue trouvée." }] };
       const lines = issues.map((i) => `- [#${i.number}](${i.html_url}) ${i.title}`).join("\n");
       return { content: [{ type: "text" as const, text: `${issues.length} issue(s) :\n\n${lines}` }] };

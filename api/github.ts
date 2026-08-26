@@ -17,7 +17,8 @@ export const PRIORITY_FIELD_ID = "IFSS_kgDOAPO9Ww";
 
 export const SPRINT_FIELD_ID = "PVTIF_lADOA8sl_s4BW3LizhSfYwQ";
 
-export const SELECT_OPTIONS: Record<keyof typeof SELECT_FIELD_IDS, Record<string, string>> = {
+/** Champs select statiques : peu de valeurs, changent rarement, référencées par du code (ex. status["a-faire"]). */
+export const SELECT_OPTIONS: Record<"status" | "team", Record<string, string>> = {
   status: {
     "a-faire":            "f75ad846",
     "en-cours":           "47fc9ee4",
@@ -34,70 +35,46 @@ export const SELECT_OPTIONS: Record<keyof typeof SELECT_FIELD_IDS, Record<string
     "PO/PM":     "8ae35510",
     "DevOps":    "479e8a34",
   },
-  epic: {
-    "[SEO] Optimisation CTR & indexation": "84f0aa1f",
-    "API":                                  "2ed97a02",
-    "Accompagner les jeunes":               "8a7a1b33",
-    "Accompagner les recruteurs":           "ac35a981",
-    "Actions emploi jeunes en formation [AB]": "e5e6d5d8",
-    "Agrégation d'offres d'emploi":         "15b744f9",
-    "Amélioration de l'algorithme":         "8d8a5dc0",
-    "Augmenter la couverture des formations": "0f653b59",
-    "Authentification pro commune":         "f83ed08e",
-    "Automation envoie des emails d'acquisition Template 2": "77d406f6",
-    "BAL":                                  "61a8d3b9",
-    "Compte utilisateur":                   "d66e44aa",
-    "DATA":                                 "49409eb1",
-    "DevOps":                               "977b7034",
-    "Diffusion de l'information":           "a8399adc",
-    "Différentiation":                      "95157164",
-    "Documentation":                        "fdd8bef8",
-    "Déploiement":                          "9a8f5801",
-    "Dépôt d'offres":                       "912534ef",
-    "FAST":                                 "b27684db",
-    "Faire émerger les besoins en recrutements": "d6518bc1",
-    "Fiabilisation de la donnée":           "e0c66090",
-    "Fiabilisation design / ux":            "96753759",
-    "Fiabilisation technique":              "aee056c6",
-    "Gestion des formations":               "a42d8e59",
-    "Harmonisation technique":              "3c817300",
-    "Homologation":                         "13572993",
-    "Lutte contre la fraude":               "228faf7c",
-    "Maintenance/Dette tech":               "3aa8dbb3",
-    "Mesure de l'impact":                   "02e98097",
-    "Mise en relation Entreprise - CFA":    "335c256e",
-    "Mise en relation Jeune - CFA":         "0e1741c5",
-    "Mise en relation Jeune - Entreprise":  "92a394fd",
-    "Monitoring / Alerting":                "2809140a",
-    "Moteur de recherche et filtres":       "f1cdf1de",
-    "Multicompte":                          "8d87e893",
-    "Optimisation technique":               "3b1395b7",
-    "Orienter les candidats":               "088b865a",
-    "Parcours utilisateur pro":             "a6966783",
-    "Passation catalogue":                  "e508e0c2",
-    "Personnalisation de l'information":    "4293803f",
-    "Process équipe":                       "8ae4a845",
-    "RDVA":                                 "baa070bd",
-    "RGAA":                                 "658d56f7",
-    "RGPD":                                 "04aa915c",
-    "Rapprocher les services LBA":          "f68fca70",
-    "Recherche utilisateur":                "42790f91",
-    "SEO / GEO":                            "6dfd967e",
-    "Suggérer des offres complètes":        "eebf849c",
-    "Suivi des candidatures":               "7855c6f6",
-    "Support API":                          "3ea85dd2",
-    "Support utilisateur":                  "f4b435f5",
-    "Sécurité / Performances":              "ec537f9b",
-    "Tests":                                "82f3a13d",
-    "The Happy Path":                       "b814bf22",
-    "🌱 Green IT":                          "6bef5e61",
-  },
-  approver: {
-    "Aurélie": "d13b4250",
-    "Claire":  "706c109d",
-    "Kevin":   "7f271d5b",
-  },
 };
+
+/** Champs select dynamiques : les valeurs vivent dans le Project GitHub, pas dans le code. */
+const DYNAMIC_SELECT_FIELDS = ["epic", "approver"] as const;
+type DynamicSelectField = typeof DYNAMIC_SELECT_FIELDS[number];
+
+function isDynamicSelectField(field: string): field is DynamicSelectField {
+  return (DYNAMIC_SELECT_FIELDS as readonly string[]).includes(field);
+}
+
+let cachedFieldOptions: Partial<Record<DynamicSelectField, { data: Record<string, string>; expiresAt: number }>> = {};
+
+/** Test-only: invalidates the dynamic field options cache so the next call re-fetches. */
+export function _resetFieldOptionsCache() { cachedFieldOptions = {}; }
+
+/**
+ * Récupère dynamiquement les options (nom → optionId) d'un champ single-select
+ * du Project via son field ID — évite de coder en dur des valeurs qui vivent
+ * dans la configuration GitHub (ex. la liste des epics). Cache 5 min.
+ */
+export async function getDynamicFieldOptions(field: DynamicSelectField): Promise<Record<string, string>> {
+  const cached = cachedFieldOptions[field];
+  if (cached && Date.now() < cached.expiresAt) return cached.data;
+
+  type Result = { node: { options?: { id: string; name: string }[] } | null };
+  const data = await graphqlRequest<Result>(
+    `query($fid:ID!){node(id:$fid){... on ProjectV2SingleSelectField{options{id name}}}}`,
+    { fid: SELECT_FIELD_IDS[field] }
+  );
+  if (!data.node?.options) {
+    throw new Error(`Champ "${field}" (${SELECT_FIELD_IDS[field]}) introuvable ou n'est pas un champ single-select du Project`);
+  }
+  const options: Record<string, string> = {};
+  for (const o of data.node.options) options[o.name] = o.id;
+  cachedFieldOptions[field] = { data: options, expiresAt: Date.now() + 5 * 60_000 };
+  return options;
+}
+
+export const listEpics = (): Promise<Record<string, string>> => getDynamicFieldOptions("epic");
+export const listApprovers = (): Promise<Record<string, string>> => getDynamicFieldOptions("approver");
 
 export const PRIORITY_OPTIONS: Record<string, string> = {
   "Urgent": "IFSSO_kgDOAap2pA",
@@ -187,7 +164,15 @@ async function restRequest<T>(path: string, method = "GET", body?: unknown): Pro
   return res.json() as Promise<T>;
 }
 
-async function graphqlRequest<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+/**
+ * `tolerateErrors` : ne lève pas si `errors` est présent tant que `data` l'est aussi.
+ * GitHub renvoie les deux simultanément dès qu'un alias échoue dans une requête à
+ * alias multiples (ex. `issue(number: N)` sur un numéro inexistant) — utile aux
+ * appelants qui traitent déjà les valeurs nulles par alias (ex. resolveIssueNodeIds).
+ * Les mutations gardent le comportement strict par défaut : un `errors` y signale
+ * un échec réel qui ne doit pas être avalé.
+ */
+async function graphqlRequest<T>(query: string, variables: Record<string, unknown>, opts?: { tolerateErrors?: boolean }): Promise<T> {
   const token = await getToken();
   const res = await fetch(`${BASE}/graphql`, {
     method: "POST",
@@ -201,7 +186,8 @@ async function graphqlRequest<T>(query: string, variables: Record<string, unknow
   });
   if (!res.ok) throw new Error(`GraphQL ${res.status}: ${await res.text()}`);
   const data = (await res.json()) as { data?: T; errors?: unknown[] };
-  if (data.errors) throw new Error(`GraphQL: ${JSON.stringify(data.errors)}`);
+  const canTolerate = opts?.tolerateErrors && data.data !== undefined;
+  if (data.errors && !canTolerate) throw new Error(`GraphQL: ${JSON.stringify(data.errors)}`);
   return data.data as T;
 }
 
@@ -242,9 +228,10 @@ export async function addIssueToProject(issueNodeId: string): Promise<string> {
 
 export async function setSelectField(itemId: string, field: keyof typeof SELECT_FIELD_IDS, value: string): Promise<void> {
   const fieldId = SELECT_FIELD_IDS[field];
-  const optionId = SELECT_OPTIONS[field][value];
+  const options = isDynamicSelectField(field) ? await getDynamicFieldOptions(field) : SELECT_OPTIONS[field];
+  const optionId = options[value];
   if (!optionId) {
-    const valid = Object.keys(SELECT_OPTIONS[field]).join(", ");
+    const valid = Object.keys(options).join(", ");
     throw new Error(`Valeur "${value}" inconnue pour "${field}". Valeurs valides : ${valid}`);
   }
   await graphqlRequest(
@@ -435,8 +422,8 @@ export async function resolveIssueNodeIds(issueNumbers: number[]): Promise<Recor
   if (!issueNumbers.length) return {};
   const aliases = issueNumbers.map((n, i) => `i${i}: issue(number: ${n}) { id }`).join("\n    ");
   const query = `query { repository(owner: "${ORG}", name: "${REPO}") {\n    ${aliases}\n  } }`;
-  type RepoResult = { repository: Record<string, { id: string }> };
-  const data = await graphqlRequest<RepoResult>(query, {});
+  type RepoResult = { repository: Record<string, { id: string } | null> };
+  const data = await graphqlRequest<RepoResult>(query, {}, { tolerateErrors: true });
   const result: Record<number, string> = {};
   issueNumbers.forEach((n, i) => {
     const node = data.repository[`i${i}`];
@@ -662,8 +649,8 @@ export function listMembers(): Promise<GitHubMember[]> {
   return paginate<GitHubMember>(`/orgs/${ORG}/members`);
 }
 
-export function listIssues(params: { labels?: string; assignee?: string; limit: number }): Promise<GitHubIssue[]> {
-  const qs = new URLSearchParams({ state: "open", per_page: String(params.limit) });
+export function listIssues(params: { labels?: string; assignee?: string; state?: "open" | "closed" | "all"; limit: number }): Promise<GitHubIssue[]> {
+  const qs = new URLSearchParams({ state: params.state ?? "open", per_page: String(params.limit) });
   if (params.labels) qs.set("labels", params.labels);
   if (params.assignee) qs.set("assignee", params.assignee);
   return restRequest<GitHubIssue[]>(`/repos/${ORG}/${REPO}/issues?${qs}`);
