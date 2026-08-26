@@ -39,22 +39,30 @@ export function buildMcpServer(): McpServer {
       if (parent_issue_number) {
         const parentNodeId = nodeIds[parent_issue_number];
         if (parentNodeId) {
-          await addSubIssue(parentNodeId, issue.node_id);
-          parentIssueUrl = `https://github.com/mission-apprentissage/labonnealternance/issues/${parent_issue_number}`;
+          try {
+            await addSubIssue(parentNodeId, issue.node_id);
+            parentIssueUrl = `https://github.com/mission-apprentissage/labonnealternance/issues/${parent_issue_number}`;
+          } catch (e) {
+            parentWarning = `#${parent_issue_number} : rattachement échoué — ${e instanceof Error ? e.message : String(e)}`;
+          }
         } else {
           parentWarning = `#${parent_issue_number} introuvable — rattachement au parent NON effectué`;
         }
       }
 
       const linkedBlockers: number[] = [];
-      const unresolvedBlockers: number[] = [];
+      const failedBlockers: string[] = [];
       for (const blockerNum of blocked_by ?? []) {
         const blockerNodeId = nodeIds[blockerNum];
-        if (blockerNodeId) {
+        if (!blockerNodeId) {
+          failedBlockers.push(`#${blockerNum} introuvable`);
+          continue;
+        }
+        try {
           await addBlockedByRelationship(issue.node_id, blockerNodeId);
           linkedBlockers.push(blockerNum);
-        } else {
-          unresolvedBlockers.push(blockerNum);
+        } catch (e) {
+          failedBlockers.push(`#${blockerNum} : rattachement échoué — ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -70,7 +78,7 @@ export function buildMcpServer(): McpServer {
       if (parentIssueUrl) lines.push(`Parent : ${parentIssueUrl}`);
       if (parentWarning) lines.push(`⚠️ Parent non rattaché : ${parentWarning}`);
       if (linkedBlockers.length) lines.push(`Blocked by : ${linkedBlockers.map((n) => `#${n}`).join(", ")}`);
-      if (unresolvedBlockers.length) lines.push(`⚠️ Bloquant(s) introuvable(s), non rattaché(s) : ${unresolvedBlockers.map((n) => `#${n}`).join(", ")}`);
+      if (failedBlockers.length) lines.push(`⚠️ Bloquant(s) non rattaché(s) : ${failedBlockers.join(" ; ")}`);
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }

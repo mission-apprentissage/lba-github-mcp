@@ -88,6 +88,47 @@ describe("create_issue via le protocole MCP", () => {
 
     const text = (result.content as { type: string; text: string }[])[0].text;
     expect(text).toContain("Blocked by : #10");
-    expect(text).toContain("⚠️ Bloquant(s) introuvable(s), non rattaché(s) : #9999");
+    expect(text).toContain("⚠️ Bloquant(s) non rattaché(s) : #9999 introuvable");
+  });
+
+  it("avertit sans planter si la mutation de rattachement du parent échoue malgré une résolution réussie", async () => {
+    // Reproduit le bug réel du 2026-08-26 : addBlockedBy/addSubIssue peut échouer
+    // (permissions, mutation invalide, etc.) même quand resolveIssueNodeIds a bien
+    // résolu le numéro — l'issue déjà créée ne doit pas se perdre dans un throw.
+    mockFetch(
+      TOKEN_RESPONSE,
+      { number: 42, title: "T", html_url: "https://github.com/x/42", node_id: "NI_42" }, // createIssue
+      { data: { addProjectV2ItemById: { item: { id: "ITEM_1" } } } }, // addIssueToProject: add
+      { data: {} }, // addIssueToProject: set status
+      { data: { repository: { i0: { id: "NI_10" } } } }, // resolveIssueNodeIds : parent résolu
+      { errors: [{ message: "Field 'addSubIssue' doesn't exist on type 'Mutation'." }] }, // addSubIssue échoue
+    );
+
+    const client = await connectedClient();
+    const result = await client.callTool({ name: "create_issue", arguments: { title: "T", parent_issue_number: 10 } });
+
+    const text = (result.content as { type: string; text: string }[])[0].text;
+    expect(text).toContain("**#42**"); // l'issue créée reste visible
+    expect(text).toContain("⚠️ Parent non rattaché");
+    expect(text).toContain("rattachement échoué");
+  });
+
+  it("avertit sans planter si la mutation de rattachement d'un bloquant échoue malgré une résolution réussie", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      { number: 42, title: "T", html_url: "https://github.com/x/42", node_id: "NI_42" }, // createIssue
+      { data: { addProjectV2ItemById: { item: { id: "ITEM_1" } } } }, // addIssueToProject: add
+      { data: {} }, // addIssueToProject: set status
+      { data: { repository: { i0: { id: "NI_10" } } } }, // resolveIssueNodeIds : bloquant résolu
+      { errors: [{ message: "Field 'addBlockedBy' doesn't exist on type 'Mutation'." }] }, // addBlockedByRelationship échoue
+    );
+
+    const client = await connectedClient();
+    const result = await client.callTool({ name: "create_issue", arguments: { title: "T", blocked_by: [10] } });
+
+    const text = (result.content as { type: string; text: string }[])[0].text;
+    expect(text).toContain("**#42**");
+    expect(text).toContain("⚠️ Bloquant(s) non rattaché(s)");
+    expect(text).toContain("rattachement échoué");
   });
 });

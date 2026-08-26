@@ -370,17 +370,16 @@ describe("addSubIssue", () => {
 // ─── addBlockedByRelationship ────────────────────────────────────────────────
 
 describe("addBlockedByRelationship", () => {
-  it("appelle addIssueRelationship avec BLOCKED_BY", async () => {
-    mockFetch(...withToken({ data: {} }));
+  it("appelle la mutation addBlockedBy (issueId = bloqué, blockingIssueId = bloquant)", async () => {
+    mockFetch(...withToken({ data: { addBlockedBy: { issue: { id: "ISSUE_NI" } } } }));
 
     await addBlockedByRelationship("ISSUE_NI", "BLOCKER_NI");
 
     const [, opts] = fetchCalls()[1];
     const body = JSON.parse(opts.body);
-    expect(body.query).toContain("addIssueRelationship");
-    expect(body.query).toContain("BLOCKED_BY");
+    expect(body.query).toContain("addBlockedBy");
     expect(body.variables.iid).toBe("ISSUE_NI");
-    expect(body.variables.rid).toBe("BLOCKER_NI");
+    expect(body.variables.bid).toBe("BLOCKER_NI");
   });
 });
 

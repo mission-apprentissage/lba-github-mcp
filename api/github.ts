@@ -441,8 +441,8 @@ export async function addSubIssue(parentNodeId: string, subIssueNodeId: string):
 
 export async function addBlockedByRelationship(issueNodeId: string, blockerNodeId: string): Promise<void> {
   await graphqlRequest(
-    `mutation($iid:ID!,$rid:ID!){addIssueRelationship(input:{issueId:$iid,relatedIssueId:$rid,relationshipType:BLOCKED_BY}){relationship{type}}}`,
-    { iid: issueNodeId, rid: blockerNodeId }
+    `mutation($iid:ID!,$bid:ID!){addBlockedBy(input:{issueId:$iid,blockingIssueId:$bid}){issue{id}}}`,
+    { iid: issueNodeId, bid: blockerNodeId }
   );
 }
 
