@@ -526,13 +526,14 @@ function makeProjectPage(items: object[], hasNextPage = false, endCursor = "curs
 function makeProjectItem(issueNumber: number, overrides: {
   status?: string; team?: string; sprint?: string;
   type?: string; priority?: string; state?: string;
-  sprintStartDate?: string; sprintDuration?: number;
+  sprintStartDate?: string; sprintDuration?: number; isArchived?: boolean;
 } = {}) {
   const { status = "a-faire", team = "Developer", sprint = "Sprint 3",
           type = "Bug", priority = "High", state = "OPEN",
-          sprintStartDate = "2026-06-02", sprintDuration = 14 } = overrides;
+          sprintStartDate = "2026-06-02", sprintDuration = 14, isArchived = false } = overrides;
   return {
     id: `ITEM_${issueNumber}`,
+    isArchived,
     fieldValues: {
       nodes: [
         { field: { name: "Status" }, name: status },
@@ -641,6 +642,47 @@ describe("listProjectItems", () => {
     expect(item.sprint_start_date).toBe("2026-06-02");
     expect(item.sprint_duration_days).toBe(14);
     expect(item.sprint_end_date).toBe("2026-06-16");
+  });
+
+  it("exclut les items archivés par défaut (comportement GitHub inchangé)", async () => {
+    mockFetch(TOKEN_RESPONSE, makeProjectPage([makeProjectItem(1)]));
+
+    const [item] = await listProjectItems("Sprint 3");
+    expect(item.archived).toBe(false);
+
+    const body = JSON.parse(fetchCalls()[1][1].body);
+    expect(body.query).toContain("archivedStates:$archived");
+    expect(body.variables.archived).toEqual(["NOT_ARCHIVED"]);
+  });
+
+  it("inclut les items archivés si includeArchived = true", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([
+        makeProjectItem(1, { sprint: "Sprint 6", isArchived: true }),
+        makeProjectItem(2, { sprint: "Sprint 6" }),
+      ])
+    );
+
+    const items = await listProjectItems("Sprint 6", 200, true);
+    expect(items.map((i) => [i.issue_number, i.archived])).toEqual([[1, true], [2, false]]);
+
+    const body = JSON.parse(fetchCalls()[1][1].body);
+    expect(body.variables.archived).toEqual(["ARCHIVED", "NOT_ARCHIVED"]);
+  });
+
+  it("conserve includeArchived sur toutes les pages", async () => {
+    mockFetch(
+      TOKEN_RESPONSE,
+      makeProjectPage([makeProjectItem(1, { isArchived: true })], true, "c1"),
+      makeProjectPage([makeProjectItem(2, { isArchived: true })], false),
+    );
+
+    const items = await listProjectItems(undefined, 200, true);
+    expect(items).toHaveLength(2);
+
+    const calls = fetchCalls();
+    expect(JSON.parse(calls[2][1].body).variables).toMatchObject({ cursor: "c1", archived: ["ARCHIVED", "NOT_ARCHIVED"] });
   });
 });
 

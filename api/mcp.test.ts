@@ -134,6 +134,40 @@ describe("create_issue via le protocole MCP", () => {
   });
 });
 
+describe("list_project_items via le protocole MCP", () => {
+  function emptyPage() {
+    return { data: { node: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } };
+  }
+
+  function sentVariables() {
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls;
+    return JSON.parse(calls[1][1].body).variables;
+  }
+
+  it("exclut les items archivés sans include_archived et suggère l'option si rien ne remonte", async () => {
+    mockFetch(TOKEN_RESPONSE, emptyPage());
+
+    const client = await connectedClient();
+    const result = await client.callTool({ name: "list_project_items", arguments: { sprint: "Sprint 6" } });
+
+    const text = (result.content as { type: string; text: string }[])[0].text;
+    expect(text).toContain("Aucun item trouvé.");
+    expect(text).toContain("include_archived: true");
+    expect(sentVariables().archived).toEqual(["NOT_ARCHIVED"]);
+  });
+
+  it("transmet include_archived: true à la requête GitHub", async () => {
+    mockFetch(TOKEN_RESPONSE, emptyPage());
+
+    const client = await connectedClient();
+    const result = await client.callTool({ name: "list_project_items", arguments: { sprint: "Sprint 6", include_archived: true } });
+
+    const text = (result.content as { type: string; text: string }[])[0].text;
+    expect(text).toBe("Aucun item trouvé.");
+    expect(sentVariables().archived).toEqual(["ARCHIVED", "NOT_ARCHIVED"]);
+  });
+});
+
 describe("isAuthorized", () => {
   afterEach(() => {
     delete process.env.MCP_SECRET;

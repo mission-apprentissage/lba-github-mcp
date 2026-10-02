@@ -159,15 +159,19 @@ export function buildMcpServer(): McpServer {
   server.registerTool(
     "list_project_items",
     {
-      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint, sprint_start_date, sprint_end_date, sprint_duration_days) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles via list_sprints.`,
+      description: `Retourne tous les items du GitHub Project LBA pour un sprint donné, avec l'ensemble de leurs champs (status, team, type, priority, sprint, sprint_start_date, sprint_end_date, sprint_duration_days, archived) et le corps de l'issue. Indispensable pour l'analyse de sprint et le report automatique des tickets non terminés. Sprints disponibles via list_sprints. Pour un sprint terminé (completed: true dans list_sprints), passer include_archived: true : ses tickets sont archivés dans le Project.`,
       inputSchema: {
         sprint: z.string().optional().describe(`Filtrer par sprint (titre exact, voir list_sprints). Si absent, retourne tous les items.`),
         limit: z.number().optional().default(200).describe("Nombre max d'items (défaut : 200)"),
+        include_archived: z.boolean().optional().default(false).describe("Inclure les items archivés du Project, nécessaire pour les sprints terminés (défaut : false)"),
       },
     },
-    async ({ sprint, limit }) => {
-      const items = await listProjectItems(sprint, limit);
-      if (!items.length) return { content: [{ type: "text" as const, text: "Aucun item trouvé." }] };
+    async ({ sprint, limit, include_archived }) => {
+      const items = await listProjectItems(sprint, limit, include_archived);
+      if (!items.length) {
+        const hint = include_archived ? "" : " Les items archivés sont exclus : relancer avec include_archived: true pour un sprint terminé.";
+        return { content: [{ type: "text" as const, text: `Aucun item trouvé.${hint}` }] };
+      }
       const json = JSON.stringify(items, null, 2);
       return { content: [{ type: "text" as const, text: `${items.length} item(s)${sprint ? ` — ${sprint}` : ""} :\n\n\`\`\`json\n${json}\n\`\`\`` }] };
     }

@@ -462,17 +462,24 @@ export interface ProjectItem {
   sprint_start_date: string | null;
   sprint_end_date: string | null;
   sprint_duration_days: number | null;
+  archived: boolean;
 }
 
-export async function listProjectItems(sprint?: string, limit = 200): Promise<ProjectItem[]> {
+/**
+ * `includeArchived` : `ProjectV2.items` n'expose que les items non archivés par
+ * défaut (`archivedStates = [NOT_ARCHIVED]`). Les tickets des sprints terminés
+ * sont archivés dans le Project et n'apparaissent qu'avec cette option.
+ */
+export async function listProjectItems(sprint?: string, limit = 200, includeArchived = false): Promise<ProjectItem[]> {
   const query = `
-    query($pid:ID!,$cursor:String){
+    query($pid:ID!,$cursor:String,$archived:[ProjectV2ItemArchivedState!]){
       node(id:$pid){
         ... on ProjectV2 {
-          items(first:100,after:$cursor){
+          items(first:100,after:$cursor,archivedStates:$archived){
             pageInfo{hasNextPage endCursor}
             nodes{
               id
+              isArchived
               fieldValues(first:20){
                 nodes{
                   ... on ProjectV2ItemFieldSingleSelectValue{
@@ -516,6 +523,7 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
   };
   type RawItem = {
     id: string;
+    isArchived: boolean;
     fieldValues: { nodes: RawFieldValue[] };
     content: {
       id: string; number: number; title: string; url: string; body: string; state: string;
@@ -527,9 +535,10 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
 
   const items: ProjectItem[] = [];
   let cursor: string | null = null;
+  const archived = includeArchived ? ["ARCHIVED", "NOT_ARCHIVED"] : ["NOT_ARCHIVED"];
 
   while (items.length < limit) {
-    const data: Result = await graphqlRequest<Result>(query, { pid: PROJECT_ID, cursor });
+    const data: Result = await graphqlRequest<Result>(query, { pid: PROJECT_ID, cursor, archived });
     const page: Result["node"]["items"] = data.node.items;
 
     for (const node of page.nodes) {
@@ -575,6 +584,7 @@ export async function listProjectItems(sprint?: string, limit = 200): Promise<Pr
         sprint_start_date:    sprintIteration?.startDate ?? null,
         sprint_end_date:      sprintEndDate,
         sprint_duration_days: sprintIteration?.duration ?? null,
+        archived:     node.isArchived,
       });
 
       if (items.length >= limit) break;
